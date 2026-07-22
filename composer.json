@@ -4,7 +4,7 @@
     "description": "SendPortal. Open-source self-hosted email marketing. Manage your own newsletters at a fraction of the cost.",
     "license": "MIT",
     "require": {
-        "php": "^8.2|^8.3",
+        "php": "^8.2",
         "guzzlehttp/guzzle": "^7.8.1",
         "laravel/framework": "^11.0",
         "laravel/horizon": "^5.24",
@@ -18,7 +18,6 @@
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.1",
         "phpunit/phpunit": "^10.5",
-        "roave/security-advisories": "dev-master",
         "spatie/laravel-ignition": "^2.5.1"
     },
     "config": {
@@ -27,6 +26,17 @@
         "sort-packages": true,
         "allow-plugins": {
             "php-http/discovery": true
+        },
+        "policy": {
+            "advisories": {
+                "block": true,
+                "audit": "fail",
+                "ignore-id": {
+                    "PKSA-3r5d-mb8f-1qw9": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first.",
+                    "PKSA-m5cs-t1y6-qpcs": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first.",
+                    "PKSA-mdq4-51ck-6kdq": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first."
+                }
+            }
         }
     },
     "extra": {
