@@ -274,20 +274,18 @@ These commands belong after Phase 2 creates `composer.lock`; audit uses the lock
 
 ## Open Questions
 
-1. **How should the milestone resolve the current security/scope contradiction?**
-   - What we know: With Composer's native blocking policy on PHP 8.4, every stable Laravel 11 tag is rejected by seven Packagist advisories; the dev branch is the only local solve. [VERIFIED: local PHP 8.4 solver]
-   - What's unclear: Whether the user accepts a narrowly documented security exception, will broaden the Laravel/Core upgrade scope, or wants to pause until a stable upstream remedy exists.
-   - Recommendation: Treat this as a `checkpoint:human-verify` before any `composer.json` change. Do not select a dev branch or disable/ignore policy automatically.
+1. **RESOLVED — How should the milestone resolve the current security/scope contradiction?**
+   - Decision (2026-07-22): The project owner approved a narrowly documented internal-only residual-risk exception instead of a Laravel 12 upgrade, because stable `mettle/sendportal-core` currently permits only Illuminate 10/11. This is a risk acceptance, not proof that the advisories are unreachable.
+   - Scope: permit only `PKSA-m5cs-t1y6-qpcs`, `PKSA-3r5d-mb8f-1qw9`, and `PKSA-mdq4-51ck-6kdq` through Composer 2.10+ `config.policy.advisories.ignore-id`, each with a reason. These are the current `laravel/framework` advisories whose affected ranges include Laravel 11 according to the Packagist API queried on 2026-07-22. Do not use package-wide/severity-wide ignores, `policy: false`, `--no-blocking`, platform-ignore flags, or `11.x-dev`.
+   - Expiry and review: remove the exception at Phase 2 lockfile review or as soon as a compatible stable SendPortal Core release permits upgrading Laravel, whichever is first. All advisory IDs outside this exact list remain blocking and audit-failing.
 
-2. **Why is `minimum-stability` globally `dev`?**
-   - What we know: The manifest has `minimum-stability: dev` and `prefer-stable: true`; it permits `11.x-dev` during the native-policy solve. [VERIFIED: composer.json and local PHP 8.4 solver]
-   - What's unclear: Which package originally required dev-level candidates.
-   - Recommendation: Inventory the original resolver's candidates before changing this setting. A stable-only policy is the correct desired outcome but cannot be committed until the Phase 1 security decision is made.
+2. **RESOLVED — Why is `minimum-stability` globally `dev`?**
+   - Decision: Retain the existing setting in Phase 1 to avoid an unrelated constraint change without historical evidence. The exception must still produce a tagged stable Laravel 11 release; `prefer-stable: true` remains, and the isolated resolver/lockfile proof must reject every `*-dev` framework version.
+   - Follow-up: Phase 2 lockfile review must reject an untagged Laravel framework version and record any other selected dev dependency for separate review.
 
-3. **How will Composer >=2.10 be enforced in all CI/release images?**
+3. **RESOLVED — How will Composer >=2.10 be enforced in all CI/release images?**
    - What we know: Composer 2.10.1 is present locally and `config.policy` was introduced in 2.10; the current CI uses third-party PHP images without an explicit Composer-version assertion. [VERIFIED: local Composer 2.10.1 and codebase grep] [CITED: https://getcomposer.org/changelog/2.10.0-RC2]
-   - What's unclear: The Composer version bundled into each existing/future CI image.
-   - Recommendation: Phase 3 must print and assert a 2.10+ Composer version before relying on policy semantics.
+   - Decision: Phase 3 owns the CI assertion. It must print and require Composer 2.10+ before relying on `config.policy`; no CI image change is planned in this manifest-only phase.
 
 ## Environment Availability
 
