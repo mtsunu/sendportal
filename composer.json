@@ -28,6 +28,7 @@
             "php-http/discovery": true
         },
         "policy": {
+            "ignore-unreachable": false,
             "advisories": {
                 "block": true,
                 "audit": "fail",
