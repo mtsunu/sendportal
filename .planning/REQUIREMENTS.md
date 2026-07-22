@@ -9,7 +9,7 @@
 
 - [ ] **COMP-01**: A clean PHP 8.4 environment can run `composer install --prefer-dist --no-interaction` successfully without `--ignore-platform-req`, `--ignore-platform-reqs`, or platform emulation.
 - [ ] **COMP-02**: The Composer PHP constraints accurately declare the supported PHP 8.2, 8.3, and 8.4 runtime contract.
-- [ ] **COMP-03**: The `roave/security-advisories` conflict no longer blocks the Laravel 11 dependency graph, and the replacement configuration does not weaken platform checks.
+- [x] **COMP-03**: The `roave/security-advisories` conflict no longer blocks the Laravel 11 dependency graph, and the replacement configuration does not weaken platform checks.
 
 ### Dependency Security & Reproducibility
 
