@@ -7,9 +7,9 @@
 
 ### Composer Compatibility
 
-- [ ] **COMP-01**: A clean PHP 8.4 environment can run `composer install --prefer-dist --no-interaction` successfully without `--ignore-platform-req`, `--ignore-platform-reqs`, or platform emulation.
+- [x] **COMP-01**: A clean PHP 8.4 environment can run `composer install --prefer-dist --no-interaction` successfully without `--ignore-platform-req`, `--ignore-platform-reqs`, or platform emulation.
 - [ ] **COMP-02**: The Composer PHP constraints accurately declare the supported PHP 8.2, 8.3, and 8.4 runtime contract.
-- [ ] **COMP-03**: The `roave/security-advisories` conflict no longer blocks the Laravel 11 dependency graph, and the replacement configuration does not weaken platform checks.
+- [x] **COMP-03**: The `roave/security-advisories` conflict no longer blocks the Laravel 11 dependency graph, and the replacement configuration does not weaken platform checks.
 
 ### Dependency Security & Reproducibility
 
@@ -51,9 +51,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COMP-01 | Phase 1 | Pending |
+| COMP-01 | Phase 1 | Complete |
 | COMP-02 | Phase 1 | Pending |
-| COMP-03 | Phase 1 | Pending |
+| COMP-03 | Phase 1 | Complete |
 | DEPS-01 | Phase 2 | Pending |
 | DEPS-02 | Phase 2 | Pending |
 | DEPS-03 | Phase 2 | Pending |
@@ -66,6 +66,7 @@
 | CI-02 | Phase 3 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 13 total
 - Mapped to phases: 13
 - Unmapped: 0 ✓
