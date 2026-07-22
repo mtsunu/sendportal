@@ -26,7 +26,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. An operator on PHP 8.4 can resolve the application's dependencies through standard Composer commands without platform-emulation or ignore flags.
   2. The published Composer metadata declares PHP 8.2, 8.3, and 8.4 as the supported runtime contract.
   3. Dependency resolution no longer fails because of the Roave/Laravel conflict, while Composer platform checks and a dependency-security safeguard remain enabled.
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Capture real PHP 8.4 solver evidence and obtain the required security/scope decision.
+- [ ] 01-02-PLAN.md — Apply the approved minimal Composer policy contract and prove it in an isolated PHP 8.4 install.
 
 ### Phase 2: Reproducible Dependency Snapshot
 **Goal**: Operators, CI, and deployments install one validated, security-checked dependency graph rather than independently resolving packages.
@@ -58,6 +62,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Constraint Resolution and Security Control | 0/TBD | Not started | - |
+| 1. Constraint Resolution and Security Control | 0/2 | Not started | - |
 | 2. Reproducible Dependency Snapshot | 0/TBD | Not started | - |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/TBD | Not started | - |
