@@ -1,31 +1,42 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-verified: 2026-07-22T16:21:23Z
+verified: 2026-07-22T17:08:11Z
 status: gaps_found
 score: 2/3 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 2/3
+  gaps_closed:
+    - "Composer fails closed for unreachable policy sources during update and install."
+  gaps_remaining:
+    - "The Composer 2.10+ policy engine is not required before operator or CI installation routes run."
+  regressions: []
 gaps:
   - truth: "Dependency resolution no longer fails because of the Roave/Laravel conflict, while Composer platform checks and a dependency-security safeguard remain enabled."
     status: failed
-    reason: "The committed native policy leaves Composer's policy.ignore-unreachable at its documented default of [update, install], so an unreachable advisory repository or policy source is silently ignored during the two operations this phase must secure. block: true and audit: fail therefore run with incomplete advisory data rather than failing closed."
+    reason: "The native replacement is implemented only by Composer 2.10+, but neither composer.json nor any supported local, CI, deployment, or documented install route rejects Composer 2.9.x before resolution. Composer 2.9.5 validates and reads the manifest's policy values but has no policy command, so it cannot enforce the replacement safeguard after Roave was removed."
     artifacts:
       - path: "composer.json"
-        issue: "config.policy at line 30 lacks ignore-unreachable: false."
+        issue: "Contains a Composer 2.10 policy block but no enforceable Composer toolchain prerequisite or preflight."
+      - path: ".github/workflows/ci.yml"
+        issue: "Runs composer install at line 43 without asserting Composer >= 2.10.0."
     missing:
-      - "Set config.policy.ignore-unreachable to false and prove an unreachable advisory/policy source makes the isolated PHP 8.4 update/install fail."
+      - "Require and verify Composer >= 2.10.0 before every supported install/update route, including CI, deployment, and documented operator instructions."
+      - "Make the failure occur before dependency resolution, then test the guard with Composer 2.9.x."
 deferred:
-  - truth: "The three accepted advisory exceptions cannot remain after their stated Phase 2 expiry without an explicit re-approval."
+  - truth: "The three temporary advisory exceptions cannot survive their stated Phase 2 expiry without explicit review or re-approval."
     addressed_in: "Phase 2"
-    evidence: "D-02 names Phase 2 lockfile review as the expiry point; Phase 2 success criterion 3 requires the exact locked graph to pass a non-bypassed security audit."
+    evidence: "The exception reasons name Phase 2 lockfile review as their expiry point, and the Phase 1 handoff requires the lockfile review to remove or reassess them."
 ---
 
 # Phase 1: Constraint Resolution and Security Control Verification Report
 
 **Phase Goal:** Operators can resolve a secure, accurately declared PHP 8.2–8.4 dependency graph on real PHP 8.4 without bypassing Composer safeguards.
-**Verified:** 2026-07-22T16:21:23Z
+**Verified:** 2026-07-22T17:08:11Z
 **Status:** gaps_found
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — after gap closure
 
 ## Goal Achievement
 
@@ -33,76 +44,87 @@ deferred:
 
 | # | Truth | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | An operator on PHP 8.4 can resolve dependencies through standard Composer commands without platform emulation or ignore flags. | ✓ VERIFIED | Independently ran a script-enabled `composer install --prefer-dist --no-interaction --no-progress` in a repository copy under PHP 8.4.23 / Composer 2.10.2, with a new empty `COMPOSER_HOME` and all policy/platform override variables unset. It completed 144 installs and package discovery, selecting `laravel/framework v11.55.0` and `mettle/sendportal-core v3.0.2`. |
-| 2 | Published Composer metadata declares PHP 8.2, 8.3, and 8.4 as supported. | ✓ VERIFIED | `composer.json:7` is `php: ^8.2`, which includes PHP 8.2–8.x; `composer validate --strict --no-check-publish` passed under PHP 8.4.23 / Composer 2.10.2. |
-| 3 | The Roave/Laravel conflict is removed while platform checks and an effective dependency-security safeguard remain enabled. | ✗ FAILED | Roave is absent and the three-ID policy is structurally narrow, but `config.policy.ignore-unreachable` is missing. Composer documents its default as `["update", "install"]`, which silently ignores unreachable policy/repository sources during resolution and install. The required security control is therefore fail-open on that observable error path. |
+| 1 | An operator on PHP 8.4 can resolve the application's dependencies through standard Composer commands without platform-emulation or ignore flags. | ✓ VERIFIED | Prior independent verification established a fresh-home script-enabled PHP 8.4 install. Regression check reran Herd Composer 2.10.2 under PHP 8.4.23 with all policy/platform override variables unset: `update --dry-run` resolved 144 packages, including tagged `laravel/framework v11.55.0` and `mettle/sendportal-core v3.0.2`; no repository lockfile was created. |
+| 2 | The published Composer metadata declares PHP 8.2, 8.3, and 8.4 as the supported runtime contract. | ✓ VERIFIED | `composer.json` declares `require.php: ^8.2`; strict validation with Composer 2.10.2 passed. The constraint includes PHP 8.2, 8.3, and 8.4. |
+| 3 | Dependency resolution no longer fails because of the Roave/Laravel conflict, while Composer platform checks and a dependency-security safeguard remain enabled. | ✗ FAILED | Roave is absent; platform emulation is absent; the narrow policy and `ignore-unreachable: false` are structurally correct and recognized by Composer 2.10.2. However, the normal PATH Composer 2.9.5 also accepts this manifest and lists its arbitrary `policy.*` keys, while `composer policy --help` exits nonzero with `Command "policy" is not defined.` No enforced project contract requires 2.10+ before install/update. |
 
 **Score:** 2/3 truths verified (0 present, behavior-unverified)
 
-## Required Artifacts
+### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 | --- | --- | --- | --- |
-| `composer.json` | Accurate PHP contract and Composer-native advisory policy without Roave. | ⚠️ PARTIAL | Exists and is substantive. It declares `^8.2`, retains Laravel `^11.0` / Core `^3.0`, has `block: true`, `audit: fail`, exactly the three approved IDs and their required reasons, and contains none of the prohibited broad-ignore/platform-bypass surfaces. Its missing fail-closed `ignore-unreachable: false` setting blocks the security-control truth. |
-| `01-02-SUMMARY.md` | Candidate/install/audit record and Phase 2 handoff. | ✓ VERIFIED | Exists and records concrete commands and versions. It was not accepted as proof: the install and audits below were rerun independently. |
-| `composer.lock` | No committed lockfile in Phase 1. | ✓ VERIFIED | Absent from the working tree and from tracked files. The verification install created a lockfile only in `/private/tmp/sendportal-phase1-verify.KtYUOX`. |
+| `composer.json` | PHP 8.2–8.4 declaration and a safe native advisory policy without Roave. | ⚠️ PARTIAL | Substantive and valid: `^8.2`, Laravel `^11.0`, Core `^3.0`, `block: true`, `audit: fail`, boolean `ignore-unreachable: false`, and exactly the three documented advisory IDs. It cannot make that policy effective for the unguarded Composer 2.9 installation route. |
+| `.planning/phases/01-constraint-resolution-and-security-control/01-01-SUMMARY.md` | Solver-evidence record. | ✓ PRESENT | Exists and is substantive; treated only as execution history, not as proof for this report. |
+| `.planning/phases/01-constraint-resolution-and-security-control/01-02-SUMMARY.md` | Install/audit evidence record. | ✓ PRESENT | Exists and is substantive; independent dry-run regression was performed instead of accepting its claims. |
+| `.planning/phases/01-constraint-resolution-and-security-control/01-03-SUMMARY.md` | Fail-closed outage-evidence record. | ✓ PRESENT | Exists and records the gap closure, but it does not wire a minimum Composer version into any supported installation path. |
+| `.github/workflows/ci.yml` | CI-side Composer toolchain enforcement. | ✗ MISSING | Existing CI invokes `composer install` directly at line 43 and has no Composer 2.10+ preflight. |
 
-## Key Link Verification
+### Key Link Verification
 
 | From | To | Via | Status | Details |
 | --- | --- | --- | --- | --- |
-| `composer.json config.policy.advisories` | Composer resolver and `composer audit --locked` | `block=true`, `audit=fail`, exact `ignore-id` map | ⚠️ PARTIAL | The configured audit passed in the isolated copy and the three ignored advisories were displayed with their reasons. An ignore-free evidence copy exited 1 and parsed to exactly the approved three IDs. The upstream-source-unreachable path remains fail-open because the enclosing policy omits `ignore-unreachable: false`. |
-| `composer.json require.php` | Real PHP 8.4 clean install | `^8.2`, fresh `COMPOSER_HOME` | ✓ WIRED | The independent isolated install above succeeded with no `config.platform`, `--ignore-platform-req*`, or inherited Composer policy/environment variables. |
+| `composer.json config.policy.ignore-unreachable` | Composer update/install policy-source handling | `false` in native policy configuration | ✓ WIRED for Composer 2.10+ | The committed boolean is present. Composer's configuration reference specifies that `false` ignores unreachable policy sources for no operations; Herd Composer 2.10.2 recognizes the `policy` command. |
+| `composer.json config.policy.advisories` | Composer dependency resolver and audit | `block=true`, `audit=fail`, exact three-ID map | ⚠️ PARTIAL | Correctly parsed by Composer 2.10.2. PATH Composer 2.9.5 validates the same manifest but has no policy implementation, so the security link is version-conditional without an entry-point guard. |
+| Supported `composer install` routes | Composer 2.10+ policy engine | Toolchain preflight before resolution | ✗ NOT_WIRED | No guard was found in `composer.json`, README, CI, or another repository installation wrapper. |
+| `composer.json require.php` | Real PHP 8.4 solver | `^8.2`, no `config.platform` or ignore flags | ✓ WIRED | The fresh-home PHP 8.4.23 Composer 2.10.2 dry-run resolution selected the expected tagged Laravel/Core graph. |
 
-## Data-Flow Trace (Level 4)
+### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 | --- | --- | --- | --- | --- |
-| `composer.json` advisory policy | advisory IDs and ignore reasons | Packagist security-advisories endpoint during `composer audit --locked` | Configured audit displayed the three mapped IDs; ignore-free JSON audit returned exactly those IDs | ✓ FLOWING (normal reachable-source path) |
+| `composer.json` policy configuration | `config.policy.*` | Composer configuration loader | `composer config --list --source` reads values from `./composer.json`; Herd 2.10.2 exposes a policy engine | ✓ FLOWING for Composer 2.10+ |
+| `composer.json` policy configuration | `config.policy.*` | PATH Composer 2.9.5 | Values are listed but no policy engine exists (`policy` command undefined) | ✗ HOLLOW for Composer <2.10 |
 
-## Behavioral Spot-Checks
+### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 | --- | --- | --- | --- |
-| Manifest validity and exact narrow policy | Herd Composer 2.10.2 `validate --strict --no-check-publish` plus PHP JSON assertion | Exit 0 / `MANIFEST_PASS` | ✓ PASS |
-| Standard PHP 8.4 install | Fresh-home, scrubbed-env `composer install --prefer-dist --no-interaction --no-progress` in a disposable copy | Exit 0; 144 packages; Laravel `v11.55.0`, Core `v3.0.2`; package discovery completed | ✓ PASS |
-| Configured audit | Fresh-home, scrubbed-env `composer audit --locked` in that copy | Exit 0; only the three documented ignored advisories shown | ✓ PASS |
-| Exact residual-risk boundary | Ignore-free copy `composer audit --locked --format=json` and exact-ID parser | Audit exit 1 as expected; parser returned only `PKSA-3r5d-mb8f-1qw9`, `PKSA-m5cs-t1y6-qpcs`, and `PKSA-mdq4-51ck-6kdq` | ✓ PASS |
-| Advisory-source outage | Inspect Composer policy semantics | **FAIL:** official Composer configuration documents `policy.ignore-unreachable` as defaulting to `["update", "install"]`; the committed policy does not override it. A temporary manifest with `ignore-unreachable: false` validated and Composer recognized the value. | ✗ FAIL |
+| Manifest validity and exact narrow policy | PHP JSON assertion; Herd Composer `validate --strict --no-check-publish` | Passed; policy has the exact three IDs, documented reasons, no Roave, no platform emulation, and `ignore-unreachable: false`. | ✓ PASS |
+| Real PHP 8.4 resolution | Fresh-home, scrubbed-env Herd Composer 2.10.2 `update --dry-run --prefer-dist --no-interaction --no-scripts --no-progress` | Exit 0; 144 package operations; Laravel `v11.55.0`, Core `v3.0.2`; repository `composer.lock` remained absent. | ✓ PASS |
+| Composer 2.10 policy capability | Herd Composer 2.10.2 `policy --help` | Exit 0; command describes custom dependency-policy management. | ✓ PASS |
+| Minimum toolchain enforcement | PATH Composer 2.9.5 `policy --help`; search all supported entry points for a `>=2.10.0` guard | Exit nonzero: `Command "policy" is not defined.` No guard found in manifest, CI, README, or installation wrapper. | ✗ FAIL |
 
-## Requirements Coverage
+### Probe Execution
+
+Step 7c: SKIPPED — this phase contains no committed `scripts/*/tests/probe-*.sh` probe. Its earlier disposable probe narration was not used as verification evidence.
+
+### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| COMP-01 | 01-02 | A clean PHP 8.4 environment can install without platform ignores or emulation. | ✓ SATISFIED | Independently reproduced standard isolated install on PHP 8.4.23 with override variables removed. |
-| COMP-02 | 01-02 | Composer constraints declare PHP 8.2, 8.3, and 8.4 support. | ✓ SATISFIED | `require.php` is `^8.2`; strict validation passed. |
-| COMP-03 | 01-01, 01-02 | Roave conflict is gone without weakening platform checks or the security safeguard. | ✗ BLOCKED | The narrow policy is present and works while Packagist is reachable, but its default unreachable-source behavior weakens the safeguard for update/install. |
+| COMP-01 | 01-01, 01-02 | A clean PHP 8.4 environment can install without platform ignores or emulation. | ✓ SATISFIED | Previous independent full-install verification plus this re-verification's clean, real-PHP-8.4 solver regression; no platform-emulation or ignore surface exists. |
+| COMP-02 | 01-02 | Composer constraints declare PHP 8.2, 8.3, and 8.4 support. | ✓ SATISFIED | `require.php` is exactly `^8.2`; strict validation passes. |
+| COMP-03 | 01-01, 01-02, 01-03 | Roave conflict is gone without weakening platform checks or the security safeguard. | ✗ BLOCKED | The PHP/platform side is intact and native policy is sound under 2.10+, but the replacement safeguard is absent on accepted Composer <2.10 routes. |
 
-No Phase 1 requirements are orphaned: both plans declare all three `COMP-*` IDs.
+No Phase 1 requirements are orphaned: the plans declare COMP-01, COMP-02, and COMP-03.
 
-## Anti-Patterns Found
+### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
+| --- | --- | --- | --- | --- |
+| `composer.json` | 30 | Composer-2.10-only policy without an enforceable Composer version prerequisite. | 🛑 BLOCKER | Composer 2.9.5 accepts the manifest but cannot enforce the replacement safeguard. |
+| `.github/workflows/ci.yml` | 43 | Direct install with no Composer version preflight. | 🛑 BLOCKER | A CI image with an older Composer can run an installation without native policy enforcement. |
+
+No `TBD`, `FIXME`, `XXX`, `TODO`, placeholder, broad advisory-ignore, platform-emulation, or platform-ignore marker was found in Phase 1's changed manifest.
+
+### Review Finding Disposition
+
+**CR-01 — confirmed blocker.** The review's concern is not excluded by an enforced project contract. Composer's official [2.10 release note](https://getcomposer.org/changelog/2.10.0-RC2) says the `policy` block was added in 2.10; the current official [configuration reference](https://getcomposer.org/doc/06-config.md#policy) documents the policy enforcement semantics. The current repository has an actual Composer 2.9.5 route that validates the manifest but lacks the policy command, and no minimum version preflight in any supported entry point. The Phase 01 goal's "without bypassing Composer safeguards" wording and the project constraint against silently dropping vulnerability protection make this a goal/COMP-03 gap.
+
+**WR-01 — deferred to Phase 2.** The three exception strings specify their Phase 2 lockfile-review expiry. Phase 2 must remove or expressly re-approve them with an enforceable check. This is not the present blocker.
+
+### Deferred Items
+
+| # | Item | Addressed In | Evidence |
 | --- | --- | --- | --- |
-| `composer.json` | 30 | Omitted `config.policy.ignore-unreachable: false`; Composer defaults to silently ignoring unreachable policy/repository sources for update/install. | 🛑 BLOCKER | A security-control outage can permit resolution/install with incomplete advisory data, contrary to the no-bypass dependency-security objective. |
+| 1 | Enforce expiry/re-approval of the three temporary advisory exceptions. | Phase 2 | Phase 1 exception wording and handoff identify the Phase 2 lockfile review as the reassessment point. |
 
-No `TBD`, `FIXME`, `XXX`, placeholder, broad-ignore, platform-emulation, platform-ignore, no-blocking, policy-disable, or development-branch Laravel marker was found in the Phase 1 source artifact.
+### Gaps Summary
 
-## Review Finding Disposition
-
-### CR-01 — confirmed Phase 1 blocker
-
-This is not an out-of-scope hardening request. D-02 requires Composer's native policy to replace Roave while **all other advisories remain blocking and failing**; Phase 1's goal and COMP-03 require the retained safeguard to remain enabled. `config.policy.ignore-unreachable: false` is a minimal policy completion within the only permitted Phase 1 change surface (`composer.json`). Composer's official configuration reference states that the omitted setting defaults to `["update", "install"]`, silently ignoring unreachable repository or policy sources for those operations. The current manifest consequently misses a required error-path control.
-
-### WR-01 — follow-up for Phase 2, not a Phase 1 failure
-
-Phase 1 was explicitly approved to record a per-ID expiry reason, which each entry does. The planned expiry point is **Phase 2 lockfile review** (D-02), and Phase 2 must make that review enforceable — for example, fail a policy validation when the temporary exceptions survive without documented re-approval. It does not contradict an observable Phase 1 must-have, but must be preserved in Phase 2 planning; the current roadmap does not yet specify the enforcement command.
-
-## Gaps Summary
-
-One blocker prevents acceptance of the phase goal: add a fail-closed `config.policy.ignore-unreachable: false` alongside the existing advisory policy, then rerun the clean PHP 8.4 install/audit evidence with an intentional unreachable policy/advisory-source assertion. This preserves the approved narrow three-ID exception and does not require a Laravel/Core change or a lockfile.
+The initial fail-open outage gap is closed: `ignore-unreachable: false` is now committed. Phase 01 still cannot be accepted because its security replacement depends on a Composer 2.10 feature while pre-2.10 Composer remains an accepted, unguarded operator and CI toolchain. Add a Composer `>=2.10.0` preflight that runs before every supported install/update, document that prerequisite, and demonstrate that Composer 2.9.x fails before resolution. No roadmap phase specifically covers the operator/deployment toolchain floor, so this item is not deferred.
 
 ---
 
-_Verified: 2026-07-22T16:21:23Z_
+_Verified: 2026-07-22T17:08:11Z_
 _Verifier: the agent (gsd-verifier)_
