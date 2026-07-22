@@ -39,9 +39,9 @@ created: 2026-07-22
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | 1 | COMP-01 | T-01-01 | A clean PHP 8.4 solve/install has no `--ignore-platform-req*`, `--no-blocking`, or development-branch dependency | clean-environment integration | Isolated copy: `composer install --prefer-dist --no-interaction --no-scripts --no-progress` | ❌ decision gate | ⬜ pending |
-| TBD | TBD | 1 | COMP-02 | T-01-02 | Root manifest declares `php: ^8.2`, accurately covering PHP 8.2–8.4 | manifest | `composer validate --strict --no-check-publish` | ✅ | ⬜ pending |
-| TBD | TBD | 1 | COMP-03 | T-01-03 | Roave is removed only alongside native advisory blocking/audit policy; no policy or platform bypass is added | resolver/security | Isolated copy: `composer update --dry-run --prefer-dist --no-interaction --no-scripts --no-progress` | ❌ decision gate | ⬜ pending |
+| 01-01 / Task 1 | 01-01 | 1 | COMP-01, COMP-03 | T-01-01, T-01-03 | A clean PHP 8.4 solver uses a fresh COMPOSER_HOME, scrubbed override environment, and only the three resolved D-02 IDs | clean-environment solver | Isolated copy: `composer update --dry-run --prefer-dist --no-interaction --no-scripts --no-progress` | ✅ plan verification | ⬜ pending |
+| 01-02 / Task 1 | 01-02 | 2 | COMP-02, COMP-03 | T-01-04, T-01-05 | Root manifest declares `php: ^8.2`, retains native blocking/audit policy, and permits only the documented per-ID exception | manifest | `composer validate --strict --no-check-publish` plus exact JSON policy assertion | ✅ plan verification | ⬜ pending |
+| 01-02 / Task 2 | 01-02 | 2 | COMP-01, COMP-03 | T-01-04, T-01-06, T-01-07 | A clean install has no inherited/global Composer configuration or bypass, and the ignore-free reporting audit names exactly the approved three IDs | clean-environment integration | Temporary install, `composer audit --locked`, then ignore-free `composer audit --locked --format=json` exact-ID parser | ✅ plan verification | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,8 +49,8 @@ created: 2026-07-22
 
 ## Wave 0 Requirements
 
-- [ ] `checkpoint:human-verify` — choose the response to the seven active advisories affecting all stable Laravel 11 releases while preserving the no-bypass security rule.
-- [ ] Isolated clean-directory procedure — solver evidence must not create `composer.lock` or `vendor/` in the repository.
+- [x] Resolved D-02 decision — the project owner accepted only the documented internal-only three-ID residual-risk exception; no human checkpoint remains.
+- [ ] Isolated fresh-COMPOSER_HOME procedure — solver/install evidence must not create `composer.lock` or `vendor/` in the repository and must explicitly unset Composer policy/platform override variables.
 - [ ] Phase 3 CI assertion — require Composer 2.10+ and reject policy-disabling variables and platform-ignore flags.
 
 ---
@@ -59,7 +59,7 @@ created: 2026-07-22
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Security/scope reconciliation | COMP-01, COMP-03 | Current stable Laravel 11 versions are rejected by seven active advisories; no automated compliant graph exists today | At the human checkpoint, select an approved stable remediation, explicitly broaden scope, or pause. Do not accept `11.x-dev`, a policy override, or a broad advisory ignore. |
+| No manual-only Phase 1 verification remains | COMP-01, COMP-03 | The owner resolved the exception in D-02; its exact bounds, configured audit, and ignore-free evidence audit are automated plan checks. | Review the generated summary during normal phase review; execution must stop automatically if the configured or evidence audit diverges from the three approved IDs. |
 
 ---
 
