@@ -976,6 +976,62 @@ function workflowCommandScalars(string $contents): array
 }
 
 /**
+ * Accept only literal Docker RUN and CMD/ENTRYPOINT instruction spellings.
+ * Docker expansion, stages, shell selection, mounts, and heredocs are outside
+ * this dependency-route grammar and deliberately become explicit rejections.
+ *
+ * @return list<array{line: int, logical: string, text: string, scalar: string, parse_error: string|null}>
+ */
+function dockerCommandScalars(string $contents): array
+{
+    $commands = [];
+
+    foreach (preg_split('/\R/', $contents) as $index => $line) {
+        if (preg_match('/^\s*(RUN|CMD|ENTRYPOINT)\s+(.+)$/i', $line, $match) !== 1) {
+            continue;
+        }
+
+        $instruction = strtoupper($match[1]);
+        $value = trim($match[2]);
+        $lineNumber = $index + 1;
+
+        if (str_starts_with($value, '[')) {
+            try {
+                $array = json_decode($value, true, 32, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                $array = null;
+            }
+
+            if (! is_array($array) || $array === [] || array_filter($array, static fn (mixed $part): bool => ! is_string($part)) !== []) {
+                $commands[] = ['line' => $lineNumber, 'logical' => $line, 'text' => $value, 'scalar' => 'docker-'.$instruction.'-json', 'parse_error' => 'Docker JSON command array is outside the bounded literal grammar'];
+
+                continue;
+            }
+
+            $commands[] = ['line' => $lineNumber, 'logical' => $line, 'text' => implode(' ', $array), 'scalar' => 'docker-'.$instruction.'-json', 'parse_error' => null];
+
+            continue;
+        }
+
+        if ($instruction !== 'RUN' && str_starts_with($value, '--')) {
+            $commands[] = ['line' => $lineNumber, 'logical' => $line, 'text' => $value, 'scalar' => 'docker-'.$instruction, 'parse_error' => 'Docker instruction options are outside the bounded literal grammar'];
+
+            continue;
+        }
+
+        if ($instruction === 'RUN' && str_starts_with($value, '--')) {
+            $commands[] = ['line' => $lineNumber, 'logical' => $line, 'text' => $value, 'scalar' => 'docker-RUN', 'parse_error' => 'Docker RUN options are outside the bounded literal grammar'];
+
+            continue;
+        }
+
+        $commands[] = ['line' => $lineNumber, 'logical' => $line, 'text' => $value, 'scalar' => 'docker-'.strtolower($instruction), 'parse_error' => null];
+    }
+
+    return $commands;
+}
+
+/**
  * @param list<string> $tokens
  * @return array{executable: string, operation: string}|null
  */
@@ -985,6 +1041,12 @@ function parseInvocation(array $tokens): ?array
         $token = $tokens[0];
 
         if (in_array($token, ['if', 'then', 'elif', 'else', 'fi'], true)) {
+            array_shift($tokens);
+
+            continue;
+        }
+
+        if (in_array($token, ['!', 'do', 'done'], true)) {
             array_shift($tokens);
 
             continue;
@@ -1133,6 +1195,90 @@ function parseInvocation(array $tokens): ?array
                 }
 
                 break;
+            }
+
+            continue;
+        }
+
+        if ($token === 'exec') {
+            array_shift($tokens);
+
+            while ($tokens !== [] && in_array($tokens[0], ['-c', '-l'], true)) {
+                array_shift($tokens);
+            }
+
+            if (($tokens[0] ?? null) === '-a') {
+                array_shift($tokens);
+
+                if ($tokens === []) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                array_shift($tokens);
+            }
+
+            if (($tokens[0] ?? '') !== '' && str_starts_with($tokens[0], '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            continue;
+        }
+
+        if ($token === 'time') {
+            array_shift($tokens);
+
+            while ($tokens !== [] && in_array($tokens[0], ['-p', '--portability'], true)) {
+                array_shift($tokens);
+            }
+
+            if (($tokens[0] ?? '') !== '' && str_starts_with($tokens[0], '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            continue;
+        }
+
+        if ($token === 'nice') {
+            array_shift($tokens);
+
+            if (in_array($tokens[0] ?? null, ['-n', '--adjustment'], true)) {
+                array_shift($tokens);
+
+                if ($tokens === []) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                array_shift($tokens);
+            } elseif (preg_match('/^-n[0-9+-]+$/', (string) ($tokens[0] ?? '')) === 1) {
+                array_shift($tokens);
+            }
+
+            if (($tokens[0] ?? '') !== '' && str_starts_with($tokens[0], '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            continue;
+        }
+
+        if ($token === 'stdbuf') {
+            array_shift($tokens);
+
+            while (in_array($tokens[0] ?? null, ['-i', '-o', '-e'], true)) {
+                array_shift($tokens);
+
+                if ($tokens === []) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                array_shift($tokens);
+            }
+
+            while (preg_match('/^-[ioe].+$/', (string) ($tokens[0] ?? '')) === 1) {
+                array_shift($tokens);
+            }
+
+            if (($tokens[0] ?? '') !== '' && str_starts_with($tokens[0], '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
             }
 
             continue;
@@ -1727,6 +1873,38 @@ function inlinePhpProgram(array $details): ?array
             return ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true];
         }
 
+        if ($value === 'exec' || $value === 'time') {
+            ++$cursor;
+
+            while ($cursor < $count && in_array($details[$cursor]['value'], $value === 'exec' ? ['-c', '-l'] : ['-p', '--portability'], true)) {
+                ++$cursor;
+            }
+
+            continue;
+        }
+
+        if ($value === 'nice') {
+            ++$cursor;
+
+            if (in_array($details[$cursor]['value'] ?? null, ['-n', '--adjustment'], true)) {
+                $cursor += 2;
+            } elseif (preg_match('/^-n[0-9+-]+$/', (string) ($details[$cursor]['value'] ?? '')) === 1) {
+                ++$cursor;
+            }
+
+            continue;
+        }
+
+        if ($value === 'stdbuf') {
+            ++$cursor;
+
+            while ($cursor < $count && in_array($details[$cursor]['value'], ['-i', '-o', '-e'], true)) {
+                $cursor += 2;
+            }
+
+            continue;
+        }
+
         break;
     }
 
@@ -1781,6 +1959,23 @@ function inlinePhpProgram(array $details): ?array
     $program = $details[$cursor + 1];
 
     return ['program' => $program['value'], 'raw' => $program['raw'], 'dynamic' => $program['dynamic'], 'invalid' => false];
+}
+
+/**
+ * Recover one literal Composer/guard invocation from a bounded control body.
+ * This is deliberately lexical: expansions and quoted text are not evaluated.
+ *
+ * @return list<string>|null
+ */
+function embeddedComposerInvocationTokens(string $segment): ?array
+{
+    if (preg_match('~(?:^|[;(){}[:space:]])(?:(php)[[:space:]]+)?(bin/composer-policy|composer(?:\.phar)?)[[:space:]]+(validate|audit|install|update|require|remove|create-project|self-update|config|global|i|u|upgrade)\b~i', $segment, $match) !== 1) {
+        return null;
+    }
+
+    return $match[1] === ''
+        ? [$match[2], $match[3]]
+        : [$match[1], $match[2], $match[3]];
 }
 
 /**
@@ -1857,7 +2052,7 @@ function classifyInlinePhpRouteSegment(string $path, int $line, string $logical,
             continue;
         }
 
-        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed'] ?? false);
         $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale'], $depth, $nextTrail, $program['raw'], $program['program']);
     }
 
@@ -1943,6 +2138,18 @@ function classifyShellRouteSegment(string $path, int $line, string $logical, str
     }
 
     if ($invocation === null) {
+        $embeddedTokens = embeddedComposerInvocationTokens($segment);
+
+        if ($embeddedTokens !== null) {
+            $embeddedInvocation = parseInvocation($embeddedTokens);
+
+            if ($embeddedInvocation !== null) {
+                $route = classifyRoute($path, $embeddedInvocation['executable'], $embeddedInvocation['contract_allowed'] ?? false);
+
+                return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $embeddedInvocation['executable'], $embeddedInvocation['operation'], $route['classification'], $route['rationale'], $depth, [...$trail, 'bounded control body'])];
+            }
+        }
+
         if (isSupportedProductionRoute($path) && containsComposerExecutableText($segment)) {
             return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-shell', 'unknown', 'unclassified', 'Composer-bearing shell segment could not be classified by the bounded grammar', $depth, $trail)];
         }
@@ -1951,7 +2158,7 @@ function classifyShellRouteSegment(string $path, int $line, string $logical, str
     }
 
     if ($invocation['executable'] !== 'evaluator') {
-        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed'] ?? false);
 
         return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale'], $depth, $trail)];
     }
@@ -2123,7 +2330,7 @@ function auditRoutes(string $repositoryRoot): array
                     continue;
                 }
 
-                $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+                $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed'] ?? false);
                 $records[] = [
                     'path' => $path,
                     'line' => $launch['line'],
@@ -2147,10 +2354,12 @@ function auditRoutes(string $repositoryRoot): array
             continue;
         }
 
-        $isWorkflow = preg_match('~^\.github/workflows/.+\.ya?ml$~', $path) === 1;
+        $isWorkflow = $sourceKind === 'workflow';
         $commands = $isWorkflow
             ? workflowCommandScalars($contents)
-            : array_map(
+            : ($sourceKind === 'docker'
+                ? dockerCommandScalars($contents)
+                : array_map(
                 static fn (array $logicalLine): array => [
                     'line' => $logicalLine['line'],
                     'logical' => $logicalLine['text'],
@@ -2159,7 +2368,7 @@ function auditRoutes(string $repositoryRoot): array
                     'parse_error' => null,
                 ],
                 normalizedLogicalLines($contents),
-            );
+            ));
 
         foreach ($commands as $command) {
             $commandRecordStart = count($records);
@@ -2880,6 +3089,27 @@ PHP;
         }
     }
 
+    foreach ([
+        'negated command' => ['! composer install', '! php bin/composer-policy install'],
+        'for body' => ['for item in one; do composer install; done', 'for item in one; do php bin/composer-policy install; done'],
+        'while body' => ['while false; do composer update; done', 'while false; do php bin/composer-policy update; done'],
+        'case body' => ['case x in x) composer install ;; esac', 'case x in x) php bin/composer-policy install ;; esac'],
+        'subshell body' => ['(composer install)', '(php bin/composer-policy install)'],
+        'bash function body' => ['function runner { composer update; }', 'function runner { php bin/composer-policy update; }'],
+    ] as $scenario => [$direct, $guarded]) {
+        $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+            '.github/workflows/control-forms.yml' => "jobs:\n  audit:\n    steps:\n      - run: {$direct}\n      - run: {$guarded}\n",
+        ]);
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            assertTrue((bool) array_filter($records, static fn (array $record): bool => $record['classification'] === 'supported' && $record['executable'] === 'guard'), "Fixture {$scenario} must preserve its guarded literal route.");
+            assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must reject its direct Composer route.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
     $dockerFixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         'Dockerfile' => "RUN composer install\nRUN php bin/composer-policy install\nCMD [\"composer\", \"update\"]\nENTRYPOINT [\"php\", \"bin/composer-policy\", \"update\"]\n",
     ]);
@@ -3008,7 +3238,7 @@ PHP;
         'dynamic inline PHP launch' => 'system("composer ".'.'$operation);',
         'malformed inline PHP launch' => 'system("'.$compoundDirect.'";',
         'inline PHP without bounded launch' => 'echo "'.$compoundDirect.'";',
-        'inline PHP launch count bound' => str_repeat('system("'.$compoundDirect.'");', MAX_ROUTE_EVALUATOR_PAYLOADS + 1),
+        'inline PHP launch count bound' => str_repeat('system("'.$compoundDirect.'");', MAX_ROUTE_INLINE_PHP_LAUNCHES + 1),
         'inline PHP program length bound' => 'system("'.$compoundDirect.'");'.str_repeat('x', MAX_ROUTE_LOGICAL_LINE_LENGTH),
     ] as $scenario => $program) {
         $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: php -r '{$program}'\n");
@@ -3149,6 +3379,10 @@ shell_exec('composer install');
 proc_open([PHP_BINARY, __DIR__.'/../bin/composer-policy', 'install'], [], $pipes);
 $operation = 'install';
 exec('composer '.$operation);
+$command = 'composer install';
+system($command);
+$evaluator = "bash -c 'composer update'";
+exec($evaluator);
 PHP;
     $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, ['scripts/dependencies.php' => $phpFixture]);
 
@@ -3163,7 +3397,7 @@ PHP;
             && $record['classification'] === 'unclassified'));
         assertTrue(count($directRecords) === 5, 'Literal PHP process-launch forms must each reject direct Composer.');
         assertTrue(count($guardedRecords) === 1, 'A literal guarded PHP process array must remain supported.');
-        assertTrue(count($dynamicRecords) === 1, 'A dynamic Composer-bearing PHP launch must fail closed explicitly.');
+        assertTrue(count($dynamicRecords) === 3, 'Concatenated and variable-fed Composer/evaluator PHP launches must fail closed explicitly.');
     } finally {
         removeDirectory($fixtureRoot);
     }
