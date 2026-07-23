@@ -470,7 +470,7 @@ function initializeFixtureRepository(string $sourceRoot, string $contents): stri
     return $fixtureRoot;
 }
 
-function assertFixtureRouteFails(string $sourceRoot, string $command, int $chainIndex, string $form): void
+function assertFixtureRouteFails(string $sourceRoot, string $command, int $chainIndex, string $form, string $operation): void
 {
     $fixtureRoot = initializeFixtureRepository($sourceRoot, 'run: '.$command."\n");
 
@@ -478,10 +478,38 @@ function assertFixtureRouteFails(string $sourceRoot, string $command, int $chain
         $records = auditRoutes($fixtureRoot);
         $failures = routeAuditFailures($records);
         assertTrue($failures !== [], "Fixture {$form} must fail the route audit.");
-        assertTrue((bool) array_filter($records, static fn (array $record): bool => $record['chain'] === $chainIndex && $record['executable'] === $form && $record['classification'] === 'unsupported'), "Fixture {$form} must identify its direct chain segment.");
+        $offendingRecords = array_values(array_filter($records, static fn (array $record): bool => $record['chain'] === $chainIndex
+            && $record['executable'] === $form
+            && $record['operation'] === $operation
+            && $record['classification'] === 'unsupported'));
+        assertTrue(count($offendingRecords) === 1, "Fixture {$form} must identify its direct chain segment and operation exactly once.");
     } finally {
         removeDirectory($fixtureRoot);
     }
+}
+
+function assertFixtureRouteHasNoMutation(string $sourceRoot, string $command, string $message): void
+{
+    $fixtureRoot = initializeFixtureRepository($sourceRoot, 'run: '.$command."\n");
+
+    try {
+        assertTrue(auditRoutes($fixtureRoot) === [], $message);
+    } finally {
+        removeDirectory($fixtureRoot);
+    }
+}
+
+function assertParserRejects(callable $callback, string $expectedMessage): void
+{
+    try {
+        $callback();
+    } catch (RuntimeException $exception) {
+        assertTrue(str_contains($exception->getMessage(), $expectedMessage), "Parser failure must mention {$expectedMessage}.");
+
+        return;
+    }
+
+    fail("Parser must fail closed for {$expectedMessage}.");
 }
 
 $repositoryRoot = dirname(__DIR__, 2);
@@ -627,17 +655,45 @@ try {
 
     $guarded = 'php bin/'.'composer-policy install';
     foreach ([
-        ['composer'.' --no-interaction '.'install', 0, 'composer'],
-        ['/tmp/'.'composer.phar '.'install', 0, 'composer.phar'],
-        ['/opt/'.'composer '.'update', 0, 'composer'],
-        ['composer'.' install && '.$guarded, 0, 'composer'],
-        [$guarded.' && composer'.' install', 1, 'composer'],
-    ] as [$command, $chainIndex, $form]) {
-        assertFixtureRouteFails($repositoryRoot, $command, $chainIndex, $form);
+        ['composer'.' --no-interaction '.'install', 0, 'composer', 'install'],
+        ['/tmp/'.'composer.phar '.'install', 0, 'composer.phar', 'install'],
+        ['/opt/'.'composer '.'update', 0, 'composer', 'update'],
+        ['composer'.' install && '.$guarded, 0, 'composer', 'install'],
+        [$guarded.' && composer'.' install', 1, 'composer', 'install'],
+        [$guarded.' & '.'composer'.' install', 1, 'composer', 'install'],
+        ['composer'.' install & '.$guarded, 0, 'composer', 'install'],
+        [implode(' ', ['command', 'composer', 'install']), 0, 'composer', 'install'],
+        [implode(' ', ['env', '-i', 'composer', 'update']), 0, 'composer', 'update'],
+        [implode(' ', ['env', '-u', 'NAME', 'composer', 'require', 'vendor/package']), 0, 'composer', 'require'],
+        [implode(' ', ['CI=1', 'command', '--', 'composer', 'remove', 'vendor/package']), 0, 'composer', 'remove'],
+        [implode(' ', ['php', '/tmp/'.'composer.phar', 'install']), 0, 'composer.phar', 'install'],
+        [implode(' ', ['sudo', '-n', 'composer', 'update']), 0, 'composer', 'update'],
+        [$guarded.' || '.'composer'.' install', 1, 'composer', 'install'],
+        [$guarded.'; '.'composer'.' install', 1, 'composer', 'install'],
+        [$guarded.' | '.'composer'.' install', 1, 'composer', 'install'],
+    ] as [$command, $chainIndex, $form, $operation]) {
+        assertFixtureRouteFails($repositoryRoot, $command, $chainIndex, $form, $operation);
     }
+
+    foreach ([
+        'single-quoted ampersand' => implode(' ', ['echo', "'composer", '&', "install'"]),
+        'double-quoted ampersand' => implode(' ', ['echo', '"composer', '&', 'install"']),
+        'escaped ampersand' => implode(' ', ['echo', 'composer', '\&', 'install']),
+        'quoted command prose' => implode(' ', ['echo', '"composer', 'install"']),
+    ] as $message => $command) {
+        assertFixtureRouteHasNoMutation($repositoryRoot, $command, "Fixture {$message} must not produce a Composer mutation.");
+    }
+
+    assertTrue(commandChainSegments('first && second') === ['first', 'second'], 'The && operator must remain one list separator.');
+    assertParserRejects(static fn (): array => commandChainSegments(str_repeat('x', MAX_ROUTE_LOGICAL_LINE_LENGTH + 1)), 'logical line length');
+    assertParserRejects(static fn (): array => commandChainSegments(implode(' & ', array_fill(0, MAX_ROUTE_SEGMENTS + 1, 'true'))), 'segment count');
+    assertParserRejects(static fn (): array => commandTokens(implode(' ', array_fill(0, MAX_ROUTE_TOKENS + 1, 'token'))), 'token count');
+    assertParserRejects(static fn (): array => commandChainSegments("echo 'unterminated"), 'unterminated quote');
+    assertParserRejects(static fn (): array => commandChainSegments('echo dangling'.'\\'), 'dangling escape');
 
     $productionRecords = auditRoutes($repositoryRoot);
     assertTrue(routeAuditFailures($productionRecords, true) === [], 'Production route audit must pass using only tracked records.');
+    assertTrue(! (bool) array_filter($productionRecords, static fn (array $record): bool => str_contains($record['path'], 'sendportal-composer-route-')), 'Production route evidence must not include temporary fixture paths.');
 } finally {
     foreach ($temporaryRoots as $temporaryRoot) {
         removeDirectory($temporaryRoot);
