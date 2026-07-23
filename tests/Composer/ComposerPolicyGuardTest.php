@@ -3590,6 +3590,42 @@ PHP;
         removeDirectory($fixtureRoot);
     }
 
+    $composerWord = 'com'.'poser';
+    $indirectPhpPrograms = [
+        'callable dispatch' => "call_user_func('system', '{$composerWord} install');",
+        'variable function dispatch' => "\$launcher = 'system';\n\$launcher('{$composerWord} update');",
+        'popen dispatch' => "popen('{$composerWord} install', 'r');",
+        'marker without a direct API' => "echo '{$composerWord} audit';",
+    ];
+
+    foreach ($indirectPhpPrograms as $scenario => $program) {
+        $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+            'scripts/indirect.php' => "<?php\n\n{$program}\n",
+        ]);
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $fallback = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'scripts/indirect.php'
+                && $record['executable'] === 'unclassified-php'
+                && $record['classification'] === 'unclassified'));
+            assertTrue(count($fallback) === 1, "{$scenario} must produce exactly one source-level unclassified PHP fallback.");
+            assertTrue($fallback[0]['line'] > 0 && str_contains($fallback[0]['segment'], $composerWord), "{$scenario} fallback must retain the staged source line and raw marker-bearing program evidence.");
+            assertTrue(routeAuditFailures($records) !== [], "{$scenario} must fail the route audit without executing fixture PHP.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    $unmarkedPhpRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'scripts/unmarked.php' => "<?php\n\ncall_user_func('system', 'echo harmless');\n",
+    ]);
+
+    try {
+        assertTrue(auditRoutes($unmarkedPhpRoot) === [], 'An unmarked supported PHP program must remain outside the Composer route detector.');
+    } finally {
+        removeDirectory($unmarkedPhpRoot);
+    }
+
     $unclassifiedWorkflow = initializeFixtureRepositoryFiles($repositoryRoot, [
         '.github/workflows/routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: >2-\n          composer install\n",
     ]);
