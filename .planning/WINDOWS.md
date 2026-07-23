@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 3
 waived_count: 0
-fixed_count: 0
-total_count: 3
-last_updated: 2026-07-22T16:58:53.336Z
+fixed_count: 1
+total_count: 4
+last_updated: 2026-07-23T07:05:19.932Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,7 @@ last_updated: 2026-07-22T16:58:53.336Z
 | 1 | 01 | deviation | .planning/phases/01-constraint-resolution-and-security-control/01-01-SUMMARY.md |  | Temporary candidate ignore-id ordering was canonicalized to correct a strict verification-array comparison artifact. | open |  | 2026-07-22T16:03:21.142Z |  |
 | 2 | 01 | deviation | .planning/phases/01-constraint-resolution-and-security-control/01-02-SUMMARY.md |  | Ignore-free reporting audit exits 1 when it reports the three approved advisories; exact-ID parser treats that as required negative evidence. | open |  | 2026-07-22T16:10:45.008Z |  |
 | 3 | 01 | deviation | .planning/phases/01-constraint-resolution-and-security-control/01-03-PLAN.md |  | Task 2 outage harness used exit_status because zsh reserves status as read-only. | open |  | 2026-07-22T16:58:53.336Z |  |
+| 4 | 01 | deviation | tests/Composer/ComposerPolicyGuardTest.php |  | Independent review found and fixed per-segment route fail-open and post-probe manifest race gaps | fixed |  | 2026-07-23T07:04:54.593Z | 2026-07-23T07:05:19.932Z |
 
 ````json
 [
@@ -56,6 +57,18 @@ last_updated: 2026-07-22T16:58:53.336Z
     "reason": "",
     "recorded_at": "2026-07-22T16:58:53.336Z",
     "resolved_at": null
+  },
+  {
+    "id": 4,
+    "kind": "deviation",
+    "phase": "01",
+    "file": "tests/Composer/ComposerPolicyGuardTest.php",
+    "line": null,
+    "description": "Independent review found and fixed per-segment route fail-open and post-probe manifest race gaps",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-07-23T07:04:54.593Z",
+    "resolved_at": "2026-07-23T07:05:19.932Z"
   }
 ]
 ````

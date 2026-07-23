@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: constraint-resolution-and-security-control
 status: executing
-stopped_at: Planned 01-07-PLAN.md
-last_updated: "2026-07-23T05:04:21.616Z"
+stopped_at: Completed 01-07-PLAN.md
+last_updated: "2026-07-23T07:05:33.704Z"
 last_activity: 2026-07-23
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Phase 01 gap-closure plan ready to execute
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-22)
 ## Current Position
 
 Phase: 01 (constraint-resolution-and-security-control) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-07-23 — Phase 01 gap-closure plan ready to execute
 
-Progress: [█████████░] 86%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [█████████░] 86%
 | Phase 01 P02 | 7m | 2 tasks | 2 files |
 | Phase 01-constraint-resolution-and-security-control P03 | 21m | 2 tasks | 2 files |
 | Phase 01 P04 | 9min | 2 tasks | 5 files |
+| Phase 01 P07 | 1h 42m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,10 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase ?]: Set Composer policy.ignore-unreachable to false and proved update/install fail closed for an unreachable temporary policy source.
 - [Phase ?]: Require Composer >=2.10.0 plus a successful native policy capability probe through PHP_BINARY before dependency resolution.
 - [Phase ?]: Route every supported CI and documented operator Composer mutation command through bin/composer-policy.
+- [Phase ?]: Allow only canonical validate, audit, install, and update commands through the isolated Composer policy guard.
+- [Phase ?]: Replace caller COMPOSER_HOME with a private mode-0700 home and preserve credentials only through COMPOSER_AUTH.
+- [Phase ?]: Use bounded concurrent capture only for preflight probes and direct matching descriptors for delegated Composer I/O.
+- [Phase ?]: Fail closed per supported route segment when bounded workflow, shell, or PHP parsing cannot classify Composer-bearing execution text.
 
 ### Pending Todos
 
@@ -97,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-23T00:34:07.889Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-07-23T07:05:33.700Z
+Stopped at: Completed 01-07-PLAN.md
 Resume file: None
