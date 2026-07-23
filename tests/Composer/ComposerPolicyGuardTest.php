@@ -2584,6 +2584,44 @@ PHP;
         }
     }
 
+    $anchoredWorkflowRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        '.github/workflows/anchored-routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: &guarded php -n -r 'exec(\\\"php bin/composer-policy install\\\");'\n      - run: *guarded\n      - run: &direct php -n -r 'system(\\\"composer install\\\");'\n      - run: *direct\n",
+    ]);
+
+    try {
+        $records = auditRoutes($anchoredWorkflowRoot);
+        $anchoredGuard = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === '.github/workflows/anchored-routes.yml'
+            && $record['line'] === 5
+            && $record['executable'] === 'guard'
+            && $record['classification'] === 'supported'));
+        $aliasedDirect = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === '.github/workflows/anchored-routes.yml'
+            && $record['line'] === 7
+            && $record['classification'] !== 'supported'));
+        assertTrue(count($anchoredGuard) === 1, 'A literal workflow run alias must retain its physical alias line and classify the guarded inline PHP command.');
+        assertTrue(count($aliasedDirect) === 1, 'A literal workflow run alias must retain its physical alias line and reject direct Composer.');
+        assertTrue(routeAuditFailures($records) !== [], 'Anchored direct workflow PHP must fail the route audit.');
+    } finally {
+        removeDirectory($anchoredWorkflowRoot);
+    }
+
+    $unknownSourceRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'infra/dependency-route.txt' => 'composer install',
+        '.planning/debug/ignored-route.txt' => 'composer install',
+        'tests/Composer/ignored-route.txt' => 'composer install',
+    ]);
+
+    try {
+        $records = auditRoutes($unknownSourceRoot);
+        $unknown = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'infra/dependency-route.txt'
+            && $record['executable'] === 'unclassified-unknown-source'
+            && $record['classification'] === 'unclassified'));
+        assertTrue(count($unknown) === 1, 'A marker-bearing tracked source outside an approved provenance kind must produce exactly one source-level unclassified record.');
+        assertTrue(! (bool) array_filter($records, static fn (array $record): bool => str_starts_with($record['path'], '.planning/') || str_starts_with($record['path'], 'tests/')), 'Planning and test fixture material must remain absent from production route evidence.');
+        assertTrue(routeAuditFailures($records) !== [], 'An unknown marker-bearing source must fail the route audit.');
+    } finally {
+        removeDirectory($unknownSourceRoot);
+    }
+
     $literalMultiCommandRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         '.github/workflows/routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: |\n          php bin/composer-policy validate\n          composer install\n",
     ]);
