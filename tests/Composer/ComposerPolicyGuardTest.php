@@ -2861,6 +2861,40 @@ PHP;
         removeDirectory($unknownSourceRoot);
     }
 
+    foreach ([
+        'exec prefix' => ['exec', 'composer install', 'php bin/composer-policy install'],
+        'time prefix' => ['time', 'composer update', 'php bin/composer-policy update'],
+        'nice prefix' => ['nice -n 5', 'composer install', 'php bin/composer-policy install'],
+        'stdbuf prefix' => ['stdbuf -oL', 'composer update', 'php bin/composer-policy update'],
+    ] as $scenario => [$prefix, $direct, $guarded]) {
+        $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+            '.github/workflows/expanded-shell.yml' => "jobs:\n  audit:\n    steps:\n      - run: {$prefix} {$direct}\n      - run: {$prefix} {$guarded}\n",
+        ]);
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            assertTrue((bool) array_filter($records, static fn (array $record): bool => $record['classification'] === 'supported' && $record['executable'] === 'guard'), "Fixture {$scenario} must route its guarded literal through ComposerPolicyCommandContract.");
+            assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must reject the direct Composer route.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    $dockerFixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'Dockerfile' => "RUN composer install\nRUN php bin/composer-policy install\nCMD [\"composer\", \"update\"]\nENTRYPOINT [\"php\", \"bin/composer-policy\", \"update\"]\n",
+    ]);
+
+    try {
+        $records = auditRoutes($dockerFixtureRoot);
+        $dockerGuards = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'Dockerfile'
+            && $record['executable'] === 'guard'
+            && $record['classification'] === 'supported'));
+        assertTrue(count($dockerGuards) === 2, 'Literal Docker RUN and JSON ENTRYPOINT guarded commands must preserve supported contract evidence.');
+        assertTrue(routeAuditFailures($records) !== [], 'Literal Docker direct RUN and JSON CMD commands must fail the route audit.');
+    } finally {
+        removeDirectory($dockerFixtureRoot);
+    }
+
     $literalMultiCommandRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         '.github/workflows/routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: |\n          php bin/composer-policy validate\n          composer install\n",
     ]);
