@@ -12,6 +12,8 @@ const MAX_ROUTE_LOGICAL_LINE_LENGTH = 16384;
 const MAX_ROUTE_SEGMENTS = 64;
 const MAX_ROUTE_TOKENS = 256;
 
+require_once dirname(__DIR__, 2).'/tools/composer/ComposerPolicyCommandContract.php';
+
 function fail(string $message): never
 {
     fwrite(STDERR, "FAIL: {$message}\n");
@@ -318,7 +320,7 @@ function commandChainSegments(string $logicalLine, bool $strict = true): array
             continue;
         }
 
-        if ($quote === null && in_array($character, ['&', '|', ';'], true)) {
+        if ($quote === null && in_array($character, ['&', '|', ';', '(', ')'], true)) {
             if (($character === '&' || $character === '|') && ($logicalLine[$index + 1] ?? null) === $character) {
                 ++$index;
             }
@@ -538,6 +540,127 @@ function unquoteYamlCommandScalar(string $logicalLine): string
 }
 
 /**
+ * @return list<array{line: int, logical: string, text: string, scalar: string, parse_error: string|null}>
+ */
+function workflowCommandScalars(string $contents): array
+{
+    $lines = preg_split('/\R/', $contents);
+    $commands = [];
+
+    for ($index = 0, $count = count($lines); $index < $count; ++$index) {
+        $line = $lines[$index];
+
+        if (preg_match('/^(\s*)(?:-\s+)?run:\s*(.*)$/', $line, $matches) !== 1) {
+            continue;
+        }
+
+        $lineNumber = $index + 1;
+        $indent = strlen($matches[1]);
+        $value = rtrim($matches[2]);
+
+        if (preg_match('/^([>|])([+-]?)$/', $value, $block) === 1) {
+            $parts = [];
+            $next = $index + 1;
+
+            for (; $next < $count; ++$next) {
+                $candidate = $lines[$next];
+
+                if (trim($candidate) === '') {
+                    $parts[] = '';
+
+                    continue;
+                }
+
+                preg_match('/^(\s*)/', $candidate, $indentMatch);
+
+                if (strlen($indentMatch[1]) <= $indent) {
+                    break;
+                }
+
+                $parts[] = trim($candidate);
+            }
+
+            $index = $next - 1;
+            $commands[] = [
+                'line' => $lineNumber,
+                'logical' => trim($line),
+                'text' => $block[1] === '>' ? implode(' ', $parts) : implode("\n", $parts),
+                'scalar' => $block[1] === '>' ? 'folded' : 'literal',
+                'parse_error' => null,
+            ];
+
+            continue;
+        }
+
+        if (str_starts_with($value, '>') || str_starts_with($value, '|')) {
+            $parts = [];
+            $next = $index + 1;
+
+            for (; $next < $count; ++$next) {
+                $candidate = $lines[$next];
+
+                if (trim($candidate) === '') {
+                    continue;
+                }
+
+                preg_match('/^(\s*)/', $candidate, $indentMatch);
+
+                if (strlen($indentMatch[1]) <= $indent) {
+                    break;
+                }
+
+                $parts[] = trim($candidate);
+            }
+
+            $index = $next - 1;
+            $commands[] = [
+                'line' => $lineNumber,
+                'logical' => trim($line),
+                'text' => implode(' ', $parts),
+                'scalar' => 'unsupported-block',
+                'parse_error' => 'workflow run scalar is outside the bounded grammar',
+            ];
+
+            continue;
+        }
+
+        $scalar = 'inline';
+
+        if (($value[0] ?? null) === "'" && str_ends_with($value, "'")) {
+            $value = str_replace("''", "'", substr($value, 1, -1));
+            $scalar = 'single-quoted';
+        } elseif (($value[0] ?? null) === '"' && str_ends_with($value, '"')) {
+            $decoded = json_decode($value, true);
+
+            if (! is_string($decoded)) {
+                $commands[] = [
+                    'line' => $lineNumber,
+                    'logical' => trim($line),
+                    'text' => $value,
+                    'scalar' => 'double-quoted',
+                    'parse_error' => 'workflow run scalar has invalid quoted syntax',
+                ];
+
+                continue;
+            }
+
+            $value = $decoded;
+            $scalar = 'double-quoted';
+        }
+
+        $commands[] = [
+            'line' => $lineNumber,
+            'logical' => trim($line),
+            'text' => $value,
+            'scalar' => $scalar,
+            'parse_error' => null,
+        ];
+    }
+
+    return $commands;
+}
+
+/**
  * @param list<string> $tokens
  * @return array{executable: string, operation: string}|null
  */
@@ -545,6 +668,36 @@ function parseInvocation(array $tokens): ?array
 {
     while ($tokens !== []) {
         $token = $tokens[0];
+
+        if (in_array($token, ['if', 'then', 'elif', 'else', 'fi'], true)) {
+            array_shift($tokens);
+
+            continue;
+        }
+
+        if ($token === 'timeout') {
+            array_shift($tokens);
+
+            while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+                $option = array_shift($tokens);
+
+                if (in_array($option, ['-k', '--kill-after', '-s', '--signal'], true)) {
+                    if ($tokens === []) {
+                        return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                    }
+
+                    array_shift($tokens);
+                }
+            }
+
+            if ($tokens === [] || preg_match('/^[0-9]+(?:\.[0-9]+)?[smhd]?$/', $tokens[0]) !== 1) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            array_shift($tokens);
+
+            continue;
+        }
 
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $token) === 1 || in_array($token, ['run:', 'command:'], true)) {
             array_shift($tokens);
@@ -745,27 +898,39 @@ function parseInvocation(array $tokens): ?array
         return null;
     }
 
-    while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
-        $option = array_shift($tokens);
+    $decision = ComposerPolicyCommandContract::decide($tokens);
+    $operation = $decision['command'];
+    $knownDirectCommands = [
+        'validate',
+        'audit',
+        'install',
+        'update',
+        'require',
+        'remove',
+        'create-project',
+        'self-update',
+        'config',
+        'global',
+        'i',
+        'u',
+        'upgrade',
+    ];
 
-        if (in_array($option, ['--working-dir', '-d'], true) && $tokens !== []) {
-            array_shift($tokens);
-        }
-    }
-
-    $operation = strtolower((string) ($tokens[0] ?? ''));
-
-    if (! in_array($operation, ['install', 'update', 'require', 'remove', 'create-project'], true)) {
+    if ($executableClass !== 'guard' && ! in_array($operation, $knownDirectCommands, true)) {
         return null;
     }
 
-    return ['executable' => $executableClass, 'operation' => $operation];
+    return [
+        'executable' => $executableClass,
+        'operation' => $operation !== '' ? $operation : 'unknown',
+        'contract_allowed' => $decision['allowed'],
+    ];
 }
 
 /**
  * @return array{classification: string, rationale: string}
  */
-function classifyRoute(string $path, string $executable): array
+function classifyRoute(string $path, string $executable, bool $contractAllowed = true): array
 {
     if (str_starts_with($path, '.planning/') || str_starts_with($path, 'tests/')) {
         return ['classification' => 'non-production', 'rationale' => 'planning, history, research, and test coverage are not production dependency routes'];
@@ -788,7 +953,185 @@ function classifyRoute(string $path, string $executable): array
         return ['classification' => 'unsupported', 'rationale' => 'supported dependency route invokes Composer directly instead of the repository guard'];
     }
 
+    if (! $contractAllowed) {
+        return ['classification' => 'unsupported', 'rationale' => 'guarded command is outside the shared repository command contract'];
+    }
+
     return ['classification' => 'supported', 'rationale' => 'this command-chain segment invokes the repository guard'];
+}
+
+function containsComposerExecutableText(string $text): bool
+{
+    foreach (commandChainSegments($text, false) as $segment) {
+        $tokens = commandTokens($segment, false);
+
+        while ($tokens !== [] && (
+            preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $tokens[0]) === 1
+            || in_array($tokens[0], ['if', 'then', 'elif', 'else', 'fi'], true)
+        )) {
+            array_shift($tokens);
+        }
+
+        if (($tokens[0] ?? null) === 'timeout') {
+            array_shift($tokens);
+
+            while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+                array_shift($tokens);
+            }
+
+            if ($tokens !== [] && preg_match('/^[0-9]+(?:\.[0-9]+)?[smhd]?$/', $tokens[0]) === 1) {
+                array_shift($tokens);
+            }
+        }
+
+        $executable = strtolower(basename((string) ($tokens[0] ?? '')));
+
+        if (
+            in_array($executable, ['composer', 'composer.phar'], true)
+            || str_ends_with(str_replace('\\', '/', (string) ($tokens[0] ?? '')), 'bin/composer-policy')
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function decodePhpStringLiteral(string $literal): ?string
+{
+    $quote = $literal[0] ?? '';
+
+    if (! in_array($quote, ["'", '"'], true) || ! str_ends_with($literal, $quote)) {
+        return null;
+    }
+
+    $contents = substr($literal, 1, -1);
+
+    return $quote === "'"
+        ? str_replace(["\\\\", "\\'"], ["\\", "'"], $contents)
+        : stripcslashes($contents);
+}
+
+/**
+ * @return list<string>|null
+ */
+function literalPhpCommandTokens(string $expression): ?array
+{
+    $tokens = token_get_all('<?php '.$expression);
+    $meaningful = array_values(array_filter($tokens, static fn (array|string $token): bool => ! is_array($token)
+        || ! in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)));
+
+    if (count($meaningful) === 1 && is_array($meaningful[0]) && $meaningful[0][0] === T_CONSTANT_ENCAPSED_STRING) {
+        $command = decodePhpStringLiteral($meaningful[0][1]);
+
+        return is_string($command) ? commandTokens($command) : null;
+    }
+
+    $isArray = str_starts_with(trim($expression), '[') || preg_match('/^array\s*\(/i', trim($expression)) === 1;
+
+    if (! $isArray) {
+        return null;
+    }
+
+    $values = [];
+
+    foreach ($meaningful as $token) {
+        if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING) {
+            $value = decodePhpStringLiteral($token[1]);
+
+            if (! is_string($value)) {
+                return null;
+            }
+
+            $values[] = $value;
+        }
+    }
+
+    if ($values === []) {
+        return null;
+    }
+
+    $guardIndex = null;
+
+    foreach ($values as $index => $value) {
+        if (str_ends_with(str_replace('\\', '/', $value), 'bin/composer-policy')) {
+            $guardIndex = $index;
+
+            break;
+        }
+    }
+
+    if ($guardIndex !== null) {
+        return ['php', $values[$guardIndex], ...array_slice($values, $guardIndex + 1)];
+    }
+
+    return $values;
+}
+
+/**
+ * @return list<array{line: int, expression: string, tokens: list<string>|null, composer_bearing: bool}>
+ */
+function phpProcessLaunches(string $contents): array
+{
+    $tokens = token_get_all($contents);
+    $launches = [];
+    $functions = ['proc_open', 'exec', 'system', 'passthru', 'shell_exec'];
+    $count = count($tokens);
+
+    for ($index = 0; $index < $count; ++$index) {
+        $token = $tokens[$index];
+
+        if (! is_array($token) || $token[0] !== T_STRING || ! in_array(strtolower($token[1]), $functions, true)) {
+            continue;
+        }
+
+        $line = $token[2];
+        $cursor = $index + 1;
+
+        while ($cursor < $count && is_array($tokens[$cursor]) && $tokens[$cursor][0] === T_WHITESPACE) {
+            ++$cursor;
+        }
+
+        if (($tokens[$cursor] ?? null) !== '(') {
+            continue;
+        }
+
+        ++$cursor;
+        $depth = 0;
+        $expression = '';
+
+        for (; $cursor < $count; ++$cursor) {
+            $part = $tokens[$cursor];
+            $text = is_array($part) ? $part[1] : $part;
+
+            if (in_array($text, ['(', '[', '{'], true)) {
+                ++$depth;
+            } elseif (in_array($text, [')', ']', '}'], true)) {
+                if ($text === ')' && $depth === 0) {
+                    break;
+                }
+
+                --$depth;
+            }
+
+            if ($text === ',' && $depth === 0) {
+                break;
+            }
+
+            $expression .= $text;
+        }
+
+        $launches[] = [
+            'line' => $line,
+            'expression' => trim($expression),
+            'tokens' => literalPhpCommandTokens(trim($expression)),
+            'composer_bearing' => containsComposerExecutableText($expression)
+                || preg_match('/[\'"]composer(?:\.phar)?\s/i', $expression) === 1
+                || str_contains($expression, 'bin/composer-policy'),
+        ];
+    }
+
+    return $launches;
 }
 
 /**
@@ -803,44 +1146,183 @@ function auditRoutes(string $repositoryRoot): array
     $records = [];
 
     foreach (trackedFiles($repositoryRoot) as $path) {
+        if (str_starts_with($path, '.planning/') || str_starts_with($path, 'tests/')) {
+            continue;
+        }
+
         $contents = file_get_contents($repositoryRoot.'/'.$path);
         assertTrue($contents !== false, "Could not inspect tracked file {$path} for the route audit.");
 
         $trimmedContents = ltrim($contents);
-
-        if (
-            str_contains($contents, "\0")
+        $isPhp = str_ends_with(strtolower($path), '.php')
             || str_starts_with($trimmedContents, '<?php')
-            || str_starts_with($trimmedContents, '#!/usr/bin/env php')
-        ) {
+            || str_starts_with($trimmedContents, '#!/usr/bin/env php');
+
+        if (str_contains($contents, "\0")) {
             continue;
         }
 
-        foreach (normalizedLogicalLines($contents) as $logicalLine) {
-            $shellLine = unquoteYamlCommandScalar($logicalLine['text']);
+        if ($isPhp) {
+            if ($path === 'bin/composer-policy' || str_starts_with($path, 'tests/') || str_starts_with($path, '.planning/')) {
+                continue;
+            }
 
-            foreach (commandChainSegments($shellLine, false) as $chainIndex => $segment) {
-                if (! isPotentialInvocationSegment($segment)) {
+            foreach (phpProcessLaunches($contents) as $chainIndex => $launch) {
+                if ($launch['tokens'] === null) {
+                    if (! $launch['composer_bearing']) {
+                        continue;
+                    }
+
+                    $records[] = [
+                        'path' => $path,
+                        'line' => $launch['line'],
+                        'logical' => $launch['expression'],
+                        'scalar' => 'php-expression',
+                        'chain' => $chainIndex,
+                        'segment' => $launch['expression'],
+                        'executable' => 'unclassified-php',
+                        'operation' => 'unknown',
+                        'classification' => 'unclassified',
+                        'rationale' => 'Composer-bearing PHP process launch is dynamic or outside the bounded literal grammar',
+                    ];
+
                     continue;
                 }
 
+                $invocation = parseInvocation($launch['tokens']);
+
+                if ($invocation === null) {
+                    if ($launch['composer_bearing']) {
+                        $records[] = [
+                            'path' => $path,
+                            'line' => $launch['line'],
+                            'logical' => $launch['expression'],
+                            'scalar' => 'php-expression',
+                            'chain' => $chainIndex,
+                            'segment' => $launch['expression'],
+                            'executable' => 'unclassified-php',
+                            'operation' => 'unknown',
+                            'classification' => 'unclassified',
+                            'rationale' => 'Composer-bearing PHP process launch could not be classified',
+                        ];
+                    }
+
+                    continue;
+                }
+
+                $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+                $records[] = [
+                    'path' => $path,
+                    'line' => $launch['line'],
+                    'logical' => $launch['expression'],
+                    'scalar' => 'php-expression',
+                    'chain' => $chainIndex,
+                    'segment' => $launch['expression'],
+                    'executable' => $invocation['executable'],
+                    'operation' => $invocation['operation'],
+                    'classification' => $route['classification'],
+                    'rationale' => $route['rationale'],
+                ];
+            }
+
+            continue;
+        }
+
+        $isWorkflow = preg_match('~^\.github/workflows/.+\.ya?ml$~', $path) === 1;
+        $commands = $isWorkflow
+            ? workflowCommandScalars($contents)
+            : array_map(
+                static fn (array $logicalLine): array => [
+                    'line' => $logicalLine['line'],
+                    'logical' => $logicalLine['text'],
+                    'text' => unquoteYamlCommandScalar($logicalLine['text']),
+                    'scalar' => 'shell-line',
+                    'parse_error' => null,
+                ],
+                normalizedLogicalLines($contents),
+            );
+
+        foreach ($commands as $command) {
+            if ($command['parse_error'] !== null) {
+                if (containsComposerExecutableText($command['text'])) {
+                    $records[] = [
+                        'path' => $path,
+                        'line' => $command['line'],
+                        'logical' => $command['logical'],
+                        'scalar' => $command['scalar'],
+                        'chain' => 0,
+                        'segment' => $command['text'],
+                        'executable' => 'unclassified-workflow',
+                        'operation' => 'unknown',
+                        'classification' => 'unclassified',
+                        'rationale' => $command['parse_error'],
+                    ];
+                }
+
+                continue;
+            }
+
+            try {
+                $segments = commandChainSegments($command['text'], true);
+            } catch (RuntimeException $exception) {
+                if (containsComposerExecutableText($command['text'])) {
+                    $records[] = [
+                        'path' => $path,
+                        'line' => $command['line'],
+                        'logical' => $command['logical'],
+                        'scalar' => $command['scalar'],
+                        'chain' => 0,
+                        'segment' => $command['text'],
+                        'executable' => 'unclassified-shell',
+                        'operation' => 'unknown',
+                        'classification' => 'unclassified',
+                        'rationale' => $exception->getMessage(),
+                    ];
+                }
+
+                continue;
+            }
+
+            $recordCount = count($records);
+
+            foreach ($segments as $chainIndex => $segment) {
                 $invocation = parseInvocation(commandTokens($segment));
 
                 if ($invocation === null) {
                     continue;
                 }
 
-                $route = classifyRoute($path, $invocation['executable']);
+                $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
                 $records[] = [
                     'path' => $path,
-                    'line' => $logicalLine['line'],
-                    'logical' => $logicalLine['text'],
+                    'line' => $command['line'],
+                    'logical' => $command['logical'],
+                    'scalar' => $command['scalar'],
                     'chain' => $chainIndex,
                     'segment' => $segment,
                     'executable' => $invocation['executable'],
                     'operation' => $invocation['operation'],
                     'classification' => $route['classification'],
                     'rationale' => $route['rationale'],
+                ];
+            }
+
+            if (
+                count($records) === $recordCount
+                && $isWorkflow
+                && containsComposerExecutableText($command['text'])
+            ) {
+                $records[] = [
+                    'path' => $path,
+                    'line' => $command['line'],
+                    'logical' => $command['logical'],
+                    'scalar' => $command['scalar'],
+                    'chain' => 0,
+                    'segment' => $command['text'],
+                    'executable' => 'unclassified-workflow',
+                    'operation' => 'unknown',
+                    'classification' => 'unclassified',
+                    'rationale' => 'Composer-bearing workflow command could not be classified by the bounded shell grammar',
                 ];
             }
         }
@@ -885,9 +1367,10 @@ function printRouteAuditRecords(array $records): void
 {
     foreach ($records as $record) {
         fwrite(STDOUT, sprintf(
-            "ROUTE path=%s line=%d chain=%d segment=%s executable=%s operation=%s classification=%s logical=%s rationale=%s\n",
+            "ROUTE path=%s line=%d scalar=%s chain=%d segment=%s executable=%s operation=%s classification=%s logical=%s rationale=%s\n",
             $record['path'],
             $record['line'],
+            $record['scalar'] ?? 'legacy',
             $record['chain'],
             $record['segment'],
             $record['executable'],
