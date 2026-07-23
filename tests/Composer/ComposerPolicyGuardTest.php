@@ -2283,6 +2283,71 @@ PHP;
         }
     }
 
+    $directInstall = 'composer'.' install';
+    $directUpdate = 'composer'.' update';
+    $guardedInstall = 'php bin/'.'composer-policy install';
+
+    foreach ([
+        'sh direct payload' => ['sh', $directUpdate, 'composer', 'update', 'unsupported'],
+        'zsh direct payload' => ['zsh', $directInstall, 'composer', 'install', 'unsupported'],
+        'eval direct payload' => ['eval', $directInstall, 'composer', 'install', 'unsupported'],
+        'nested direct payload' => ['bash', 'sh -c "'.$directInstall.'"', 'composer', 'install', 'unsupported'],
+        'nested guarded payload' => ['bash', 'sh -c "'.$guardedInstall.'"', 'guard', 'install', 'supported'],
+    ] as $scenario => [$evaluator, $payload, $executable, $operation, $classification]) {
+        $command = $evaluator === 'eval'
+            ? "eval '{$payload}'"
+            : "{$evaluator} -c '{$payload}'";
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $matching = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === $executable
+                && $record['operation'] === $operation
+                && $record['classification'] === $classification));
+            assertTrue($matching !== [], "Fixture {$scenario} must produce its nested {$classification} record.");
+
+            if ($classification === 'unsupported') {
+                assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+            }
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    $unsupportedEvaluatorForms = [
+        'parameter expansion' => 'bash -c "'.$directInstall.' $'.'PAYLOAD"',
+        'command substitution' => 'bash -c "$(printf '.$directInstall.')"',
+        'backtick substitution' => 'bash -c "`printf '.$directInstall.'`"',
+        'concatenated payload' => "bash -c 'composer'\" install\"",
+        'missing shell payload' => 'bash -c',
+        'extra shell argv' => "bash -c '{$directInstall}' positional",
+        'unsupported shell option' => "bash --noprofile -c '{$directInstall}'",
+        'multi-word eval' => 'eval composer install',
+    ];
+
+    $depthPayload = $directInstall;
+
+    for ($index = 0; $index < MAX_ROUTE_EVALUATOR_DEPTH + 1; ++$index) {
+        $depthPayload = 'bash -c "'.addcslashes($depthPayload, "\\\"").'"';
+    }
+
+    $unsupportedEvaluatorForms['evaluator depth bound'] = $depthPayload;
+    $unsupportedEvaluatorForms['evaluator payload count bound'] = implode('; ', array_fill(0, MAX_ROUTE_EVALUATOR_PAYLOADS + 1, "bash -c 'true'"));
+    $unsupportedEvaluatorForms['payload length bound'] = "bash -c '".$directInstall.' '.str_repeat('x', MAX_ROUTE_LOGICAL_LINE_LENGTH)."'";
+
+    foreach ($unsupportedEvaluatorForms as $scenario => $command) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['classification'] === 'unclassified'));
+            assertTrue($unclassified !== [], "Fixture {$scenario} must produce an explicit unclassified evaluator record.");
+            assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
     $unknownShellRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         'scripts/dependencies.sh' => "#!/bin/sh\ncomposer --bogus install\n",
     ]);
