@@ -1206,7 +1206,13 @@ function isSupportedProductionRoute(string $path): bool
 
 function containsComposerExecutableText(string $text): bool
 {
-    foreach (commandChainSegments($text, false) as $segment) {
+    try {
+        $segments = commandChainSegments($text, false);
+    } catch (RuntimeException) {
+        return preg_match('~(?:composer(?:\\.phar)?|bin/composer-policy|\\b(?:bash|sh|zsh|eval)\\b)~i', $text) === 1;
+    }
+
+    foreach ($segments as $segment) {
         $details = commandTokenDetails($segment, false);
         $tokens = array_column($details, 'value');
 
@@ -1476,6 +1482,12 @@ function classifyShellRouteSegment(string $path, int $line, string $logical, str
 
     if ($payload['dynamic']) {
         return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload is dynamic", $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    $payloadQuoteModes = array_values(array_unique(array_column($payload['fragments'], 'quote')));
+
+    if (count($payloadQuoteModes) > 1) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload is concatenated", $depth, $nextTrail, $payload['raw'], $payload['value'])];
     }
 
     if (strlen($payload['value']) > MAX_ROUTE_LOGICAL_LINE_LENGTH) {
