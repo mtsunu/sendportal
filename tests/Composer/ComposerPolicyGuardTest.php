@@ -93,6 +93,10 @@ file_put_contents((string) getenv('TRUSTED_COMPOSER_MARKER'), json_encode([
     'arguments' => array_slice(\$argv, 1),
     'cwd' => getcwd(),
     'php_binary' => PHP_BINARY,
+    'composer_home' => getenv('COMPOSER_HOME'),
+    'composer_auth' => getenv('COMPOSER_AUTH'),
+    'home_config_exists' => is_file((string) getenv('COMPOSER_HOME').'/config.json'),
+    'home_auth_exists' => is_file((string) getenv('COMPOSER_HOME').'/auth.json'),
 ], JSON_THROW_ON_ERROR)."\\n", FILE_APPEND);
 
 if (in_array('--version', \$argv, true)) {
@@ -122,6 +126,13 @@ function createTemporaryRepository(string $sourceRoot): string
     assertTrue(copy($guard, $temporaryRoot.'/composer-policy'), 'Could not copy the Composer policy guard.');
     writeFile($temporaryRoot.'/bin/composer-policy', (string) file_get_contents($temporaryRoot.'/composer-policy'));
     unlink($temporaryRoot.'/composer-policy');
+    writeFile($temporaryRoot.'/composer.json', (string) file_get_contents($sourceRoot.'/composer.json'));
+
+    $commandContract = $sourceRoot.'/tools/composer/ComposerPolicyCommandContract.php';
+
+    if (is_file($commandContract)) {
+        writeFile($temporaryRoot.'/tools/composer/ComposerPolicyCommandContract.php', (string) file_get_contents($commandContract));
+    }
 
     return $temporaryRoot;
 }
@@ -1031,7 +1042,21 @@ try {
     $overrideEnvironment = assertionEnvironment($overrideRoot, $overrideShadowMarker, $overrideTrustedMarker);
     writeSyntheticDistribution($overrideRoot);
 
-    foreach (['COMPOSER_BIN', 'COMPOSER', 'COMPOSER_POLICY', 'COMPOSER_NO_AUDIT', 'COMPOSER_NO_BLOCKING', 'COMPOSER_NO_SECURITY_BLOCKING', 'COMPOSER_IGNORE_PLATFORM_REQ', 'COMPOSER_IGNORE_PLATFORM_REQS'] as $name) {
+    foreach ([
+        'COMPOSER_BIN',
+        'COMPOSER',
+        'COMPOSER_POLICY',
+        'COMPOSER_NO_AUDIT',
+        'COMPOSER_NO_BLOCKING',
+        'COMPOSER_NO_SECURITY_BLOCKING',
+        'COMPOSER_IGNORE_PLATFORM_REQ',
+        'COMPOSER_IGNORE_PLATFORM_REQS',
+        'COMPOSER_POLICY_ADVISORIES_BLOCK',
+        'COMPOSER_POLICY_MALWARE_BLOCK',
+        'COMPOSER_POLICY_ABANDONED_BLOCK',
+        'COMPOSER_SECURITY_BLOCKING_ABANDONED',
+        'COMPOSER_AUDIT_ABANDONED',
+    ] as $name) {
         $environment = $overrideEnvironment;
         $environment[$name] = '1';
         [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'install'], $environment, $overrideRoot);
@@ -1077,6 +1102,131 @@ try {
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
         assertTrue(! file_exists($externalManifestRoot.'/composer.lock'), 'Rejected external installs must not create a lockfile.');
         assertTrue(! is_dir($externalManifestRoot.'/vendor'), 'Rejected external installs must not create a vendor tree.');
+    }
+
+    $hostileHome = createTemporaryDirectory('sendportal-composer-hostile-home');
+    $temporaryRoots[] = $hostileHome;
+    writeFile($hostileHome.'/config.json', json_encode([
+        'config' => [
+            'allow-plugins' => false,
+            'disable-tls' => true,
+            'platform' => ['php' => '8.2.0'],
+            'secure-http' => false,
+        ],
+        'repositories' => [
+            ['type' => 'composer', 'url' => 'http://packages.invalid'],
+        ],
+        'policy' => [
+            'advisories' => [
+                'ignore' => ['vendor/*'],
+                'ignore-id' => ['PKSA-hostile-global' => 'hostile global exception'],
+                'ignore-severity' => ['high'],
+            ],
+        ],
+    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
+    writeFile($hostileHome.'/auth.json', "{\"http-basic\":{\"repo.packagist.org\":{\"username\":\"copied\",\"password\":\"forbidden\"}}}\n");
+    @unlink($overrideTrustedMarker);
+    @unlink($overrideShadowMarker);
+    $hostileEnvironment = $overrideEnvironment;
+    $hostileEnvironment['COMPOSER_HOME'] = $hostileHome;
+    $hostileEnvironment['COMPOSER_AUTH'] = '{"github-oauth":{"github.com":"task-1-auth-sentinel"}}';
+    [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'validate'], $hostileEnvironment, $overrideRoot);
+    assertTrue($status === 0, "The isolated guarded child must still delegate validate: {$output}");
+    $hostileInvocations = array_values(array_filter(explode("\n", (string) file_get_contents($overrideTrustedMarker))));
+    assertTrue(count($hostileInvocations) === 3, 'The hostile-home case must run only version, policy, and validate.');
+
+    foreach ($hostileInvocations as $invocation) {
+        $record = json_decode($invocation, true, 512, JSON_THROW_ON_ERROR);
+        assertTrue(is_string($record['composer_home']) && $record['composer_home'] !== $hostileHome, 'Every child must receive a guard-owned Composer home.');
+        assertTrue(! $record['home_config_exists'], 'Hostile global config.json must not reach a guarded child.');
+        assertTrue(! $record['home_auth_exists'], 'Global auth.json must not be copied into the guard-owned home.');
+        assertTrue($record['composer_auth'] === $hostileEnvironment['COMPOSER_AUTH'], 'COMPOSER_AUTH must be preserved explicitly.');
+    }
+
+    $allowedCommands = [
+        ['validate'],
+        ['audit'],
+        ['install'],
+        ['update'],
+        ['--no-cache', '-vvv', 'update', '--dry-run'],
+    ];
+
+    foreach ($allowedCommands as $arguments) {
+        @unlink($overrideTrustedMarker);
+        @unlink($overrideShadowMarker);
+        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
+        assertTrue($status === 0, 'Canonical guarded command must delegate: '.implode(' ', $arguments)." {$output}");
+        $invocations = array_values(array_filter(explode("\n", (string) file_get_contents($overrideTrustedMarker))));
+        assertTrue(count($invocations) === 3, 'Canonical guarded commands must run version, policy, and delegation only.');
+    }
+
+    $deniedCommands = [
+        ['config', 'policy.advisories.block', 'false'],
+        ['global', 'config', 'policy.advisories.ignore-severity', 'high'],
+        ['create-project', 'vendor/package'],
+        ['self-update'],
+        ['require', 'vendor/package'],
+        ['remove', 'vendor/package'],
+        ['i'],
+        ['u'],
+        ['upgrade'],
+        ['unknown-command'],
+        ['--file', 'other.json', 'install'],
+        ['--global', 'install'],
+        ['--project-dir', '/tmp', 'install'],
+    ];
+
+    foreach ($deniedCommands as $arguments) {
+        @unlink($overrideTrustedMarker);
+        @unlink($overrideShadowMarker);
+        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
+        assertTrue($status !== 0 && str_contains($output, 'Composer command rejected'), 'Unreviewed command must fail at the command contract: '.implode(' ', $arguments));
+        assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
+    }
+
+    $manifestMutations = [
+        'advisory blocking disabled' => static function (array &$manifest): void {
+            $manifest['config']['policy']['advisories']['block'] = false;
+        },
+        'extra advisory id' => static function (array &$manifest): void {
+            $manifest['config']['policy']['advisories']['ignore-id']['PKSA-extra-test'] = 'unapproved';
+        },
+        'broad advisory ignore' => static function (array &$manifest): void {
+            $manifest['config']['policy']['advisories']['ignore'] = ['vendor/*'];
+        },
+        'severity advisory ignore' => static function (array &$manifest): void {
+            $manifest['config']['policy']['advisories']['ignore-severity'] = ['high'];
+        },
+        'platform emulation' => static function (array &$manifest): void {
+            $manifest['config']['platform'] = ['php' => '8.2.0'];
+        },
+        'Roave restored' => static function (array &$manifest): void {
+            $manifest['require-dev']['roave/security-advisories'] = 'dev-master';
+        },
+        'PHP bound changed' => static function (array &$manifest): void {
+            $manifest['require']['php'] = '^8.4';
+        },
+        'Laravel bound changed' => static function (array &$manifest): void {
+            $manifest['require']['laravel/framework'] = '^12.0';
+        },
+        'Core bound changed' => static function (array &$manifest): void {
+            $manifest['require']['mettle/sendportal-core'] = '^4.0';
+        },
+    ];
+
+    foreach ($manifestMutations as $scenario => $mutateManifest) {
+        $manifestRoot = createTemporaryRepository($repositoryRoot);
+        $temporaryRoots[] = $manifestRoot;
+        $trustedMarker = $manifestRoot.'/trusted.marker';
+        $shadowMarker = $manifestRoot.'/shadow.marker';
+        $environment = assertionEnvironment($manifestRoot, $shadowMarker, $trustedMarker);
+        writeSyntheticDistribution($manifestRoot);
+        $manifest = json_decode((string) file_get_contents($manifestRoot.'/composer.json'), true, 512, JSON_THROW_ON_ERROR);
+        $mutateManifest($manifest);
+        writeFile($manifestRoot.'/composer.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
+        [$status, $output] = runCommand([PHP_BINARY, $manifestRoot.'/bin/composer-policy', 'update', '--dry-run'], $environment, $manifestRoot);
+        assertTrue($status !== 0 && str_contains($output, 'Composer manifest policy rejected'), "Manifest mutation {$scenario} must fail before Composer.");
+        assertNoComposerRan($trustedMarker, $shadowMarker, "Manifest mutation {$scenario}");
     }
 
     $guarded = 'php bin/'.'composer-policy install';
