@@ -20,9 +20,14 @@ function reject(string $message): never
  * @param list<string> $command
  * @return array{int, string}
  */
-function runComposer(array $command): array
+function runComposer(array $command, string $repositoryRoot): array
 {
-    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $process = proc_open(
+        $command,
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        $repositoryRoot,
+    );
 
     if (! is_resource($process)) {
         reject('Composer distribution unavailable.');
@@ -45,7 +50,7 @@ function isReadableRegularFile(string $path): bool
 }
 
 /**
- * @return array{phar: string, record: string}
+ * @return array{root: string, phar: string, record: string}
  */
 function repositoryDistributionPaths(): array
 {
@@ -62,15 +67,17 @@ function repositoryDistributionPaths(): array
     }
 
     return [
+        'root' => $repositoryRoot,
         'phar' => $repositoryRoot.'/tools/composer/'.COMPOSER_PHAR_NAME,
         'record' => $repositoryRoot.'/tools/composer/'.COMPOSER_RECORD_NAME,
     ];
 }
 
-function verifiedComposerPath(): string
+/**
+ * @param array{root: string, phar: string, record: string} $paths
+ */
+function verifiedComposerPath(array $paths): string
 {
-    $paths = repositoryDistributionPaths();
-
     if (! isReadableRegularFile($paths['phar']) || ! isReadableRegularFile($paths['record'])) {
         reject('Composer distribution unavailable.');
     }
@@ -120,6 +127,16 @@ function rejectOverrides(array $arguments): void
     }
 
     foreach ($arguments as $argument) {
+        if (
+            $argument === '--working-dir'
+            || str_starts_with($argument, '--working-dir=')
+            || $argument === '-d'
+            || str_starts_with($argument, '-d=')
+            || (str_starts_with($argument, '-d') && strlen($argument) > 2)
+        ) {
+            reject('Composer override rejected.');
+        }
+
         foreach (['--ignore-platform-req', '--ignore-platform-reqs', '--no-blocking', '--no-security-blocking', '--no-audit'] as $option) {
             if ($argument === $option || str_starts_with($argument, $option.'=')) {
                 reject('Composer override rejected.');
@@ -144,21 +161,23 @@ if ($arguments === []) {
 }
 
 rejectOverrides($arguments);
-$composerPath = verifiedComposerPath();
+$distribution = repositoryDistributionPaths();
+$composerPath = verifiedComposerPath($distribution);
+$repositoryRoot = $distribution['root'];
 
-[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction']);
+[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction'], $repositoryRoot);
 
 if ($versionStatus !== 0 || ! hasExactComposerVersion($versionOutput)) {
     reject('Composer distribution version verification failed.');
 }
 
-[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction']);
+[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction'], $repositoryRoot);
 
 if ($policyStatus !== 0) {
     reject('Composer distribution policy capability unavailable.');
 }
 
-[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments]);
+[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot);
 
 fwrite(STDOUT, $delegatedOutput);
 
