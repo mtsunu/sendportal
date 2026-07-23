@@ -1,0 +1,142 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const MINIMUM_COMPOSER_VERSION = '2.10.0';
+
+/**
+ * @param list<string> $command
+ * @return array{int, string}
+ */
+function runComposer(array $command): array
+{
+    $process = proc_open(
+        $command,
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+
+    if (! is_resource($process)) {
+        fwrite(STDERR, "Could not start Composer through the current PHP interpreter.\n");
+
+        exit(1);
+    }
+
+    $output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+
+    return [proc_close($process), $output];
+}
+
+function reject(string $message): never
+{
+    fwrite(STDERR, "Composer policy guard: {$message}\n");
+
+    exit(1);
+}
+
+function resolveComposer(): string
+{
+    $path = getenv('PATH');
+
+    if (! is_string($path) || $path === '') {
+        reject('PATH does not contain a Composer executable required by this repository native policy.');
+    }
+
+    foreach (explode(PATH_SEPARATOR, $path) as $directory) {
+        $candidate = rtrim($directory === '' ? '.' : $directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'composer';
+
+        if (! is_file($candidate) || ! is_readable($candidate) || ! is_executable($candidate)) {
+            continue;
+        }
+
+        $resolved = realpath($candidate);
+
+        if ($resolved !== false && is_file($resolved) && is_readable($resolved)) {
+            return $resolved;
+        }
+    }
+
+    reject('PATH does not contain a readable Composer executable required by this repository native policy.');
+}
+
+function rejectOverrides(array $arguments): void
+{
+    $environmentOverrides = [
+        'COMPOSER_BIN',
+        'COMPOSER',
+        'COMPOSER_POLICY',
+        'COMPOSER_NO_AUDIT',
+        'COMPOSER_NO_BLOCKING',
+        'COMPOSER_NO_SECURITY_BLOCKING',
+        'COMPOSER_IGNORE_PLATFORM_REQ',
+        'COMPOSER_IGNORE_PLATFORM_REQS',
+    ];
+
+    foreach ($environmentOverrides as $name) {
+        $value = getenv($name);
+
+        if (is_string($value) && $value !== '') {
+            reject("{$name} is not allowed because this repository native policy needs it disabled.");
+        }
+    }
+
+    $optionPrefixes = [
+        '--ignore-platform-req',
+        '--ignore-platform-reqs',
+        '--no-audit',
+        '--no-blocking',
+        '--no-security-blocking',
+    ];
+
+    foreach ($arguments as $argument) {
+        foreach ($optionPrefixes as $option) {
+            if ($argument === $option || str_starts_with($argument, $option.'=')) {
+                reject("{$option} is not allowed because this repository native policy needs it enabled.");
+            }
+        }
+    }
+}
+
+function composerVersion(string $output): ?string
+{
+    if (preg_match('/Composer version\\s+([0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/i', $output, $matches) !== 1) {
+        return null;
+    }
+
+    return $matches[1];
+}
+
+if (PHP_SAPI !== 'cli') {
+    reject('this command must run from the CLI.');
+}
+
+$arguments = array_values(array_slice($argv, 1));
+
+if ($arguments === []) {
+    reject('a Composer command is required.');
+}
+
+rejectOverrides($arguments);
+$composerPath = resolveComposer();
+
+[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction']);
+$version = $versionStatus === 0 ? composerVersion($versionOutput) : null;
+
+if ($version === null || version_compare($version, MINIMUM_COMPOSER_VERSION, '<')) {
+    reject('Composer >= 2.10.0 is required because this repository native policy needs it before dependency resolution.');
+}
+
+[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction']);
+
+if ($policyStatus !== 0) {
+    reject('Composer native policy capability is required because this repository native policy needs it before dependency resolution.');
+}
+
+[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments]);
+
+fwrite(STDOUT, $delegatedOutput);
+
+exit($exitStatus);
