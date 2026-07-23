@@ -3617,6 +3617,22 @@ PHP;
         }
     }
 
+    $applicationIndirectRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'app/IndirectComposer.php' => "<?php\n\n\$launcher = 'system';\n\$launcher('composer install');\n",
+    ]);
+
+    try {
+        $records = auditRoutes($applicationIndirectRoot);
+        $fallback = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'app/IndirectComposer.php'
+            && $record['executable'] === 'unclassified-php'
+            && $record['classification'] === 'unclassified'));
+        assertTrue(count($fallback) === 1, 'An application variable-function Composer dispatcher must produce exactly one source-level unclassified PHP fallback.');
+        assertTrue($fallback[0]['line'] > 0 && str_contains($fallback[0]['segment'], 'composer install'), 'Application fallback evidence must retain the staged source line and raw command-bearing program.');
+        assertTrue(routeAuditFailures($records) !== [], 'An application variable-function Composer dispatcher must fail the route audit without executing fixture PHP.');
+    } finally {
+        removeDirectory($applicationIndirectRoot);
+    }
+
     $unmarkedPhpRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         'scripts/unmarked.php' => "<?php\n\ncall_user_func('system', 'echo harmless');\n",
     ]);
