@@ -901,12 +901,27 @@ function printRouteAuditRecords(array $records): void
 
 function initializeFixtureRepository(string $sourceRoot, string $contents): string
 {
+    return initializeFixtureRepositoryFiles($sourceRoot, [
+        '.github/workflows/routes.yml' => $contents,
+    ]);
+}
+
+/**
+ * @param array<string, string> $files
+ */
+function initializeFixtureRepositoryFiles(string $sourceRoot, array $files): string
+{
     $fixtureRoot = sys_get_temp_dir().'/sendportal-composer-route-'.bin2hex(random_bytes(8));
     writeFile($fixtureRoot.'/bin/composer-policy', (string) file_get_contents($sourceRoot.'/bin/composer-policy'));
-    writeFile($fixtureRoot.'/.github/workflows/routes.yml', $contents);
+    writeFile($fixtureRoot.'/tools/composer/ComposerPolicyCommandContract.php', (string) file_get_contents($sourceRoot.'/tools/composer/ComposerPolicyCommandContract.php'));
+
+    foreach ($files as $path => $contents) {
+        writeFile($fixtureRoot.'/'.$path, $contents);
+    }
+
     [$status, $output] = runCommand(['git', 'init', '--quiet'], getenv(), $fixtureRoot);
     assertTrue($status === 0, "Could not initialize the route-audit fixture repository: {$output}");
-    [$status, $output] = runCommand(['git', 'add', 'bin/composer-policy', '.github/workflows/routes.yml'], getenv(), $fixtureRoot);
+    [$status, $output] = runCommand(['git', 'add', 'bin/composer-policy', 'tools/composer/ComposerPolicyCommandContract.php', ...array_keys($files)], getenv(), $fixtureRoot);
     assertTrue($status === 0, "Could not stage the route-audit fixture repository: {$output}");
 
     return $fixtureRoot;
@@ -1270,6 +1285,94 @@ try {
         'quoted command prose' => implode(' ', ['echo', '"composer', 'install"']),
     ] as $message => $command) {
         assertFixtureRouteHasNoMutation($repositoryRoot, $command, "Fixture {$message} must not produce a Composer mutation.");
+    }
+
+    $workflowForms = [
+        'folded block scalar' => "jobs:\n  audit:\n    steps:\n      - run: >-\n          composer\n          install\n",
+        'literal block scalar' => "jobs:\n  audit:\n    steps:\n      - run: |\n          composer update\n",
+        'sequence item run' => "jobs:\n  audit:\n    steps:\n      - run: composer install\n",
+        'quoted inline run' => "jobs:\n  audit:\n    steps:\n      - run: \"composer update\"\n",
+        'canonical inline run' => "run: composer install\n",
+    ];
+
+    foreach ($workflowForms as $form => $workflow) {
+        $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, ['.github/workflows/routes.yml' => $workflow]);
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $direct = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'composer'
+                && in_array($record['operation'], ['install', 'update'], true)
+                && $record['classification'] === 'unsupported'));
+            assertTrue(count($direct) === 1, "Workflow {$form} must produce one exact direct Composer failure record.");
+            assertTrue(routeAuditFailures($records) !== [], "Workflow {$form} must fail closed.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    foreach ([
+        ['if composer install; then true; fi', 'composer', 'install'],
+        ['(composer update)', 'composer', 'update'],
+        ['timeout 30 composer install', 'composer', 'install'],
+        ['composer i', 'composer', 'i'],
+        ['composer u', 'composer', 'u'],
+        ['composer upgrade', 'composer', 'upgrade'],
+        ['php bin/composer-policy i', 'guard', 'i'],
+        ['php bin/composer-policy require vendor/package', 'guard', 'require'],
+    ] as [$command, $executable, $operation]) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $offending = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === $executable
+                && $record['operation'] === $operation
+                && $record['classification'] === 'unsupported'));
+            assertTrue(count($offending) === 1, "Shell route {$command} must produce one exact failure record.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    $phpFixture = <<<'PHP'
+<?php
+
+proc_open(['composer', 'install'], [], $pipes);
+exec('composer update');
+system('composer install');
+passthru('composer update');
+shell_exec('composer install');
+proc_open([PHP_BINARY, __DIR__.'/../bin/composer-policy', 'install'], [], $pipes);
+$operation = 'install';
+exec('composer '.$operation);
+PHP;
+    $fixtureRoot = initializeFixtureRepositoryFiles($repositoryRoot, ['scripts/dependencies.php' => $phpFixture]);
+
+    try {
+        $records = auditRoutes($fixtureRoot);
+        $directRecords = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'composer'
+            && $record['classification'] === 'unsupported'));
+        $guardedRecords = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'guard'
+            && $record['operation'] === 'install'
+            && $record['classification'] === 'supported'));
+        $dynamicRecords = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'unclassified-php'
+            && $record['classification'] === 'unclassified'));
+        assertTrue(count($directRecords) === 5, 'Literal PHP process-launch forms must each reject direct Composer.');
+        assertTrue(count($guardedRecords) === 1, 'A literal guarded PHP process array must remain supported.');
+        assertTrue(count($dynamicRecords) === 1, 'A dynamic Composer-bearing PHP launch must fail closed explicitly.');
+    } finally {
+        removeDirectory($fixtureRoot);
+    }
+
+    $unclassifiedWorkflow = initializeFixtureRepositoryFiles($repositoryRoot, [
+        '.github/workflows/routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: >2-\n          composer install\n",
+    ]);
+
+    try {
+        $records = auditRoutes($unclassifiedWorkflow);
+        $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['classification'] === 'unclassified'));
+        assertTrue(count($unclassified) === 1, 'Composer-bearing workflow syntax outside the bounded scalar grammar must fail closed explicitly.');
+    } finally {
+        removeDirectory($unclassifiedWorkflow);
     }
 
     assertTrue(commandChainSegments('first && second') === ['first', 'second'], 'The && operator must remain one list separator.');
