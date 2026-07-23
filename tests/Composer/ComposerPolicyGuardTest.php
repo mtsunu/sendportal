@@ -87,6 +87,7 @@ function writeSyntheticDistribution(string $repositoryRoot, string $version = '2
 
 file_put_contents((string) getenv('TRUSTED_COMPOSER_MARKER'), json_encode([
     'arguments' => array_slice(\$argv, 1),
+    'cwd' => getcwd(),
     'php_binary' => PHP_BINARY,
 ], JSON_THROW_ON_ERROR)."\\n", FILE_APPEND);
 
@@ -117,6 +118,17 @@ function createTemporaryRepository(string $sourceRoot): string
     assertTrue(copy($guard, $temporaryRoot.'/composer-policy'), 'Could not copy the Composer policy guard.');
     writeFile($temporaryRoot.'/bin/composer-policy', (string) file_get_contents($temporaryRoot.'/composer-policy'));
     unlink($temporaryRoot.'/composer-policy');
+
+    return $temporaryRoot;
+}
+
+function createTemporaryDirectory(string $prefix): string
+{
+    $temporaryRoot = sys_get_temp_dir().'/'.$prefix.'-'.bin2hex(random_bytes(8));
+
+    if (! mkdir($temporaryRoot, 0700, true) && ! is_dir($temporaryRoot)) {
+        fail('Could not create the temporary Composer test directory.');
+    }
 
     return $temporaryRoot;
 }
@@ -509,15 +521,21 @@ try {
     $successTrustedMarker = $successRoot.'/trusted.marker';
     $successShadowMarker = $successRoot.'/shadow.marker';
     $successEnvironment = assertionEnvironment($successRoot, $successShadowMarker, $successTrustedMarker);
+    $successCallerRoot = createTemporaryDirectory('sendportal-composer-caller');
+    $temporaryRoots[] = $successCallerRoot;
     writeSyntheticDistribution($successRoot);
-    [$status, $output] = runCommand([PHP_BINARY, $successRoot.'/bin/composer-policy', 'update', '--dry-run', '--no-interaction'], $successEnvironment, $successRoot);
+    [$status, $output] = runCommand([PHP_BINARY, $successRoot.'/bin/composer-policy', 'update', '--dry-run', '--prefer-dist', '-vvv'], $successEnvironment, $successCallerRoot);
     assertTrue($status === 0, "A matching repository distribution must be delegated to: {$output}");
     assertTrue(! file_exists($successShadowMarker), 'A compliant-looking PATH shadow must never execute.');
     $invocations = array_filter(explode("\n", (string) file_get_contents($successTrustedMarker)));
     assertTrue(count($invocations) === 3, 'The trusted distribution must receive version, policy, and delegated calls only.');
+    foreach ($invocations as $invocation) {
+        $record = json_decode($invocation, true, 512, JSON_THROW_ON_ERROR);
+        assertTrue($record['cwd'] === realpath($successRoot), 'Every trusted Composer process must use the canonical repository root.');
+    }
     $delegation = json_decode((string) end($invocations), true, 512, JSON_THROW_ON_ERROR);
     assertTrue($delegation['php_binary'] === PHP_BINARY, 'The trusted distribution must be invoked through PHP_BINARY.');
-    assertTrue($delegation['arguments'] === ['update', '--dry-run', '--no-interaction'], 'Delegation must preserve requested Composer arguments.');
+    assertTrue($delegation['arguments'] === ['update', '--dry-run', '--prefer-dist', '-vvv'], 'Delegation must preserve requested Composer arguments.');
 
     foreach ([
         'tampered' => static function (string $root): void {
@@ -565,6 +583,46 @@ try {
         [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'install'], $environment, $overrideRoot);
         assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), "{$name} must be rejected before Composer starts.");
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, "{$name} override");
+    }
+
+    $externalManifestRoot = createTemporaryDirectory('sendportal-composer-external');
+    $temporaryRoots[] = $externalManifestRoot;
+    writeFile($externalManifestRoot.'/composer.json', json_encode([
+        'name' => 'example/policy-free-project',
+        'require' => new stdClass(),
+    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)."\n");
+
+    $directorySelectors = [
+        ['--working-dir='.$externalManifestRoot, 'validate'],
+        ['--working-dir', $externalManifestRoot, 'validate'],
+        ['-d='.$externalManifestRoot, 'validate'],
+        ['-d', $externalManifestRoot, 'validate'],
+        ['-d'.$externalManifestRoot, 'validate'],
+        ['--working-dir'],
+        ['-d'],
+    ];
+
+    foreach ($directorySelectors as $arguments) {
+        @unlink($overrideTrustedMarker);
+        @unlink($overrideShadowMarker);
+        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
+        assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), 'Every Composer working-directory selector must be rejected.');
+        assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
+    }
+
+    foreach ([
+        ['--working-dir='.$externalManifestRoot, 'install', '--prefer-dist', '--no-interaction'],
+        ['-d', $externalManifestRoot, 'install', '--prefer-dist', '--no-interaction'],
+        ['-d='.$externalManifestRoot, 'install', '--prefer-dist', '--no-interaction'],
+        ['-d'.$externalManifestRoot, 'install', '--prefer-dist', '--no-interaction'],
+    ] as $arguments) {
+        @unlink($overrideTrustedMarker);
+        @unlink($overrideShadowMarker);
+        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
+        assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), 'A policy-free external manifest must not be installable through the guard.');
+        assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
+        assertTrue(! file_exists($externalManifestRoot.'/composer.lock'), 'Rejected external installs must not create a lockfile.');
+        assertTrue(! is_dir($externalManifestRoot.'/vendor'), 'Rejected external installs must not create a vendor tree.');
     }
 
     $guarded = 'php bin/'.'composer-policy install';
