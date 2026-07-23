@@ -30,4 +30,15 @@ SendPortal V3 requires:
 - Laravel 10+
 - MySQL (≥ 5.7) or PostgreSQL (≥ 9.4)
 
+### Dependency management
+
+Composer 2.10.0 or newer is required because this repository's committed native security policy is enforced by that Composer line. From this checkout, use the guarded command for both an operator install and intentional dependency-update work:
+
+```sh
+php bin/composer-policy install --prefer-dist --no-interaction
+php bin/composer-policy update --prefer-dist --no-interaction
+```
+
+`COMPOSER_BIN` is intentionally unsupported: the guard must not be redirected to an arbitrary PHP program. A repository-owned deployment install script was not found during the route audit, so this project does not invent deployment automation; operators following the external installation guide must use the guarded command after entering this checkout. The native policy remains blocking, and this guidance preserves the existing Laravel 11 and SendPortal Core integration.
+
 If you are on an earlier version of PHP (7.3+) or Laravel (8+), please use [SendPortal V2](https://github.com/mettle/sendportal/releases/tag/v2.0.4)

@@ -2,12 +2,6 @@
 
 declare(strict_types=1);
 
-if (($argv[1] ?? null) === '--route-audit') {
-    fwrite(STDERR, "FAIL: Route audit is not implemented.\n");
-
-    exit(1);
-}
-
 /**
  * Dependency-free CLI regression coverage for bin/composer-policy.
  *
@@ -79,8 +73,187 @@ function removeDirectory(string $path): void
     rmdir($path);
 }
 
+/**
+ * @return list<string>
+ */
+function trackedFiles(string $repositoryRoot): array
+{
+    $process = proc_open(['git', 'ls-files', '-z'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $repositoryRoot);
+
+    if (! is_resource($process)) {
+        fail('Could not enumerate tracked files for the route audit.');
+    }
+
+    $output = stream_get_contents($pipes[1]);
+    $errors = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+
+    if (proc_close($process) !== 0) {
+        fail("Could not enumerate tracked files for the route audit: {$errors}");
+    }
+
+    return array_values(array_filter(explode("\0", $output), static fn (string $path): bool => $path !== ''));
+}
+
+/**
+ * @return list<array{line: int, text: string}>
+ */
+function normalizedLogicalLines(string $contents): array
+{
+    $logicalLines = [];
+    $buffer = '';
+    $startLine = 1;
+    $lineNumber = 1;
+
+    foreach (preg_split('/\R/', $contents) as $line) {
+        $trimmed = rtrim($line);
+        $continues = str_ends_with($trimmed, '\\');
+        $fragment = $continues ? substr($trimmed, 0, -1) : $line;
+        $buffer .= ($buffer === '' ? '' : ' ').$fragment;
+
+        if (! $continues) {
+            $logicalLines[] = [
+                'line' => $startLine,
+                'text' => trim((string) preg_replace('/\s+/', ' ', $buffer)),
+            ];
+            $buffer = '';
+            $startLine = $lineNumber + 1;
+        }
+
+        ++$lineNumber;
+    }
+
+    if ($buffer !== '') {
+        $logicalLines[] = ['line' => $startLine, 'text' => trim((string) preg_replace('/\s+/', ' ', $buffer))];
+    }
+
+    return $logicalLines;
+}
+
+/**
+ * @return array{classification: string, rationale: string}
+ */
+function classifyRoute(string $path, string $form): array
+{
+    if (str_starts_with($path, '.planning/')) {
+        return ['classification' => 'unsupported', 'rationale' => 'planning, historical, or research prose is not an executable dependency route'];
+    }
+
+    if (str_starts_with($path, 'tests/')) {
+        return ['classification' => 'unsupported', 'rationale' => 'test or fixture coverage is not an operator dependency route'];
+    }
+
+    $supported = $path === 'README.md'
+        || str_starts_with($path, '.github/workflows/')
+        || str_starts_with($path, 'scripts/')
+        || str_starts_with($path, 'bin/')
+        || str_starts_with($path, 'docker/')
+        || str_starts_with($path, 'containers/')
+        || str_starts_with($path, 'Dockerfile')
+        || $path === 'Makefile';
+
+    if (! $supported) {
+        return ['classification' => 'unclassified', 'rationale' => 'matched Composer mutation text has no approved route classification'];
+    }
+
+    if (! str_contains($form, 'bin/composer-policy')) {
+        return ['classification' => 'unsupported', 'rationale' => 'supported executable or operator route does not reach bin/composer-policy'];
+    }
+
+    return ['classification' => 'supported', 'rationale' => 'complete command chain invokes bin/composer-policy'];
+}
+
+function assertGuardStructure(string $guard): void
+{
+    $requiredFragments = [
+        "'COMPOSER_BIN'",
+        "if (is_string(\$value) && \$value !== '')",
+        "runComposer([PHP_BINARY, \$composerPath, '--version', '--no-interaction'])",
+        "runComposer([PHP_BINARY, \$composerPath, 'policy', '--help', '--no-interaction'])",
+        'runComposer([PHP_BINARY, $composerPath, ...$arguments])',
+    ];
+
+    foreach ($requiredFragments as $fragment) {
+        assertTrue(str_contains($guard, $fragment), "Guard static audit is missing {$fragment}.");
+    }
+
+    $override = strpos($guard, 'rejectOverrides($arguments);');
+    $resolved = strpos($guard, '$composerPath = resolveComposer();');
+    $version = strpos($guard, "runComposer([PHP_BINARY, \$composerPath, '--version', '--no-interaction'])");
+    $policy = strpos($guard, "runComposer([PHP_BINARY, \$composerPath, 'policy', '--help', '--no-interaction'])");
+    $delegation = strpos($guard, 'runComposer([PHP_BINARY, $composerPath, ...$arguments])');
+
+    assertTrue(is_int($override) && is_int($resolved) && is_int($version) && is_int($policy) && is_int($delegation), 'Guard preflight positions must be discoverable.');
+    assertTrue($override < $resolved && $resolved < $version && $version < $policy && $policy < $delegation, 'Guard must finish override, path, version, and policy preflights before delegation.');
+}
+
+function auditRoutes(string $repositoryRoot): void
+{
+    $guard = file_get_contents($repositoryRoot.'/bin/composer-policy');
+
+    if ($guard === false) {
+        fail('Could not read bin/composer-policy for the route audit.');
+    }
+
+    assertGuardStructure($guard);
+
+    $records = [];
+    $pattern = '/(?<![A-Za-z0-9_\\/-])(?:(?:php\\s+)?(?:\\.\\/)?bin\\/composer-policy|composer)\\s+(install|update|require|remove|create-project)\\b/i';
+
+    foreach (trackedFiles($repositoryRoot) as $path) {
+        $contents = file_get_contents($repositoryRoot.'/'.$path);
+
+        if ($contents === false) {
+            fail("Could not inspect tracked file {$path} for the route audit.");
+        }
+
+        foreach (normalizedLogicalLines($contents) as $logicalLine) {
+            if (preg_match_all($pattern, $logicalLine['text'], $matches, PREG_OFFSET_CAPTURE) !== false) {
+                foreach ($matches[1] as $match) {
+                    $route = classifyRoute($path, $logicalLine['text']);
+                    $records[] = [
+                        'path' => $path,
+                        'line' => $logicalLine['line'],
+                        'form' => $logicalLine['text'],
+                        'operation' => strtolower($match[0]),
+                        'classification' => $route['classification'],
+                        'rationale' => $route['rationale'],
+                    ];
+                }
+            }
+        }
+    }
+
+    usort($records, static fn (array $left, array $right): int => [$left['path'], $left['line'], $left['operation'], $left['form']] <=> [$right['path'], $right['line'], $right['operation'], $right['form']]);
+
+    foreach ($records as $record) {
+        fwrite(STDOUT, sprintf(
+            "ROUTE path=%s line=%d operation=%s classification=%s form=%s rationale=%s\n",
+            $record['path'],
+            $record['line'],
+            $record['operation'],
+            $record['classification'],
+            $record['form'],
+            $record['rationale'],
+        ));
+
+        assertTrue($record['classification'] !== 'unclassified', "Unclassified Composer route: {$record['path']}:{$record['line']}");
+        assertTrue($record['classification'] !== 'unsupported' || str_starts_with($record['path'], '.planning/') || str_starts_with($record['path'], 'tests/'), "Unsupported executable route: {$record['path']}:{$record['line']}");
+    }
+
+    assertTrue($records !== [], 'The route audit must discover Composer mutation forms.');
+    fwrite(STDOUT, 'Composer route audit passed with '.count($records)." classified records.\n");
+}
+
 $repositoryRoot = dirname(__DIR__, 2);
 $guard = $repositoryRoot.'/bin/composer-policy';
+
+if (($argv[1] ?? null) === '--route-audit') {
+    auditRoutes($repositoryRoot);
+
+    exit(0);
+}
 $temporaryRoot = sys_get_temp_dir().'/sendportal-composer-policy-'.bin2hex(random_bytes(8));
 
 if (! mkdir($temporaryRoot.'/bin', 0700, true) && ! is_dir($temporaryRoot.'/bin')) {

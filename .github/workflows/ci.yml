@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install composer dependencies
-        run: composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+        run: php bin/composer-policy install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
       - name: Run Testsuite against MySQL
         run: vendor/bin/phpunit
         env:
