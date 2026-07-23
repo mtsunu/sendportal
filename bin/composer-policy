@@ -18,15 +18,17 @@ function reject(string $message): never
 
 /**
  * @param list<string> $command
+ * @param array<string, string> $environment
  * @return array{int, string}
  */
-function runComposer(array $command, string $repositoryRoot): array
+function runComposer(array $command, string $repositoryRoot, array $environment): array
 {
     $process = proc_open(
         $command,
         [1 => ['pipe', 'w'], 2 => ['redirect', 1]],
         $pipes,
         $repositoryRoot,
+        $environment,
     );
 
     if (! is_resource($process)) {
@@ -37,6 +39,58 @@ function runComposer(array $command, string $repositoryRoot): array
     fclose($pipes[1]);
 
     return [proc_close($process), $output];
+}
+
+function removeComposerHome(string $path): void
+{
+    if (! is_dir($path)) {
+        return;
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+
+    foreach ($iterator as $item) {
+        $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+    }
+
+    @rmdir($path);
+}
+
+/**
+ * @return array{home: string, environment: array<string, string>}
+ */
+function isolatedComposerEnvironment(): array
+{
+    $home = sys_get_temp_dir().'/sendportal-composer-home-'.bin2hex(random_bytes(16));
+
+    if (! mkdir($home, 0700) || ! chmod($home, 0700)) {
+        reject('Composer isolated home unavailable.');
+    }
+
+    $stat = @lstat($home);
+
+    if (! is_array($stat) || (($stat['mode'] & 0777) !== 0700)) {
+        removeComposerHome($home);
+        reject('Composer isolated home unavailable.');
+    }
+
+    register_shutdown_function(static function () use ($home): void {
+        removeComposerHome($home);
+    });
+
+    $environment = getenv();
+
+    if (! is_array($environment)) {
+        removeComposerHome($home);
+        reject('Composer isolated environment unavailable.');
+    }
+
+    $environment['COMPOSER_HOME'] = $home;
+
+    return ['home' => $home, 'environment' => $environment];
 }
 
 function isReadableRegularFile(string $path): bool
@@ -117,7 +171,21 @@ function verifiedComposerPath(array $paths): string
  */
 function rejectOverrides(array $arguments): void
 {
-    foreach (['COMPOSER_BIN', 'COMPOSER', 'COMPOSER_POLICY', 'COMPOSER_NO_AUDIT', 'COMPOSER_NO_BLOCKING', 'COMPOSER_NO_SECURITY_BLOCKING', 'COMPOSER_IGNORE_PLATFORM_REQ', 'COMPOSER_IGNORE_PLATFORM_REQS'] as $name) {
+    foreach ([
+        'COMPOSER_BIN',
+        'COMPOSER',
+        'COMPOSER_POLICY',
+        'COMPOSER_NO_AUDIT',
+        'COMPOSER_NO_BLOCKING',
+        'COMPOSER_NO_SECURITY_BLOCKING',
+        'COMPOSER_IGNORE_PLATFORM_REQ',
+        'COMPOSER_IGNORE_PLATFORM_REQS',
+        'COMPOSER_POLICY_ADVISORIES_BLOCK',
+        'COMPOSER_POLICY_MALWARE_BLOCK',
+        'COMPOSER_POLICY_ABANDONED_BLOCK',
+        'COMPOSER_SECURITY_BLOCKING_ABANDONED',
+        'COMPOSER_AUDIT_ABANDONED',
+    ] as $name) {
         $value = getenv($name);
 
         if (is_string($value) && $value !== '') {
@@ -149,6 +217,69 @@ function hasExactComposerVersion(string $output): bool
     return preg_match('/^Composer version '.preg_quote(COMPOSER_RELEASE, '/').'(?:\s|$)/mi', $output) === 1;
 }
 
+function hasExactManifestPolicy(string $repositoryRoot): bool
+{
+    $contents = @file_get_contents($repositoryRoot.'/composer.json');
+
+    if (! is_string($contents)) {
+        return false;
+    }
+
+    try {
+        $manifest = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return false;
+    }
+
+    if (! is_array($manifest)) {
+        return false;
+    }
+
+    $require = $manifest['require'] ?? null;
+    $requireDev = $manifest['require-dev'] ?? null;
+    $config = $manifest['config'] ?? null;
+    $policy = is_array($config) ? ($config['policy'] ?? null) : null;
+    $advisories = is_array($policy) ? ($policy['advisories'] ?? null) : null;
+
+    if (
+        ! is_array($require)
+        || ! is_array($requireDev)
+        || ! is_array($config)
+        || ! is_array($policy)
+        || ! is_array($advisories)
+        || ($require['php'] ?? null) !== '^8.2'
+        || ($require['laravel/framework'] ?? null) !== '^11.0'
+        || ($require['mettle/sendportal-core'] ?? null) !== '^3.0'
+        || array_key_exists('roave/security-advisories', $require)
+        || array_key_exists('roave/security-advisories', $requireDev)
+        || array_key_exists('platform', $config)
+        || array_key_exists('audit', $config)
+        || ($policy['ignore-unreachable'] ?? null) !== false
+        || ($advisories['block'] ?? null) !== true
+        || ($advisories['audit'] ?? null) !== 'fail'
+    ) {
+        return false;
+    }
+
+    $policyKeys = array_keys($policy);
+    $advisoryKeys = array_keys($advisories);
+    sort($policyKeys);
+    sort($advisoryKeys);
+
+    if ($policyKeys !== ['advisories', 'ignore-unreachable'] || $advisoryKeys !== ['audit', 'block', 'ignore-id']) {
+        return false;
+    }
+
+    $rationale = 'This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first.';
+    $expectedIgnoreIds = [
+        'PKSA-3r5d-mb8f-1qw9' => $rationale,
+        'PKSA-m5cs-t1y6-qpcs' => $rationale,
+        'PKSA-mdq4-51ck-6kdq' => $rationale,
+    ];
+
+    return ($advisories['ignore-id'] ?? null) === $expectedIgnoreIds;
+}
+
 if (PHP_SAPI !== 'cli') {
     reject('this command must run from the CLI.');
 }
@@ -161,22 +292,42 @@ if ($arguments === []) {
 
 rejectOverrides($arguments);
 $distribution = repositoryDistributionPaths();
+$commandContractPath = $distribution['root'].'/tools/composer/ComposerPolicyCommandContract.php';
+
+if (! isReadableRegularFile($commandContractPath)) {
+    reject('Composer command contract unavailable.');
+}
+
+require $commandContractPath;
+
+$commandDecision = ComposerPolicyCommandContract::decide($arguments);
+
+if (! $commandDecision['allowed']) {
+    reject('Composer command rejected.');
+}
+
+$isolatedEnvironment = isolatedComposerEnvironment();
+
+if (in_array($commandDecision['command'], ['install', 'update'], true) && ! hasExactManifestPolicy($distribution['root'])) {
+    reject('Composer manifest policy rejected.');
+}
+
 $composerPath = verifiedComposerPath($distribution);
 $repositoryRoot = $distribution['root'];
 
-[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction'], $repositoryRoot);
+[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
 
 if ($versionStatus !== 0 || ! hasExactComposerVersion($versionOutput)) {
     reject('Composer distribution version verification failed.');
 }
 
-[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction'], $repositoryRoot);
+[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
 
 if ($policyStatus !== 0) {
     reject('Composer distribution policy capability unavailable.');
 }
 
-[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot);
+[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot, $isolatedEnvironment['environment']);
 
 fwrite(STDOUT, $delegatedOutput);
 

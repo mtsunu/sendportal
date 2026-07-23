@@ -173,6 +173,11 @@ PHP);
         $environment['COMPOSER_NO_SECURITY_BLOCKING'],
         $environment['COMPOSER_IGNORE_PLATFORM_REQ'],
         $environment['COMPOSER_IGNORE_PLATFORM_REQS'],
+        $environment['COMPOSER_POLICY_ADVISORIES_BLOCK'],
+        $environment['COMPOSER_POLICY_MALWARE_BLOCK'],
+        $environment['COMPOSER_POLICY_ABANDONED_BLOCK'],
+        $environment['COMPOSER_SECURITY_BLOCKING_ABANDONED'],
+        $environment['COMPOSER_AUDIT_ABANDONED'],
     );
 
     return $environment;
