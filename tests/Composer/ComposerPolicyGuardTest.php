@@ -2833,6 +2833,38 @@ function assertParserRejects(callable $callback, string $expectedMessage): void
     fail("Parser must fail closed for {$expectedMessage}.");
 }
 
+function auditFunctionSource(string $function): string
+{
+    $reflection = new ReflectionFunction($function);
+    $lines = file(__FILE__, FILE_IGNORE_NEW_LINES);
+    assertTrue($lines !== false, 'Could not read the audit harness source for self-inspection.');
+
+    return implode("\n", array_slice((array) $lines, $reflection->getStartLine() - 1, $reflection->getEndLine() - $reflection->getStartLine() + 1));
+}
+
+function phpFinalizationSource(): string
+{
+    $collected = [];
+    $depth = 0;
+
+    foreach (explode("\n", auditFunctionSource('auditRoutes')) as $line) {
+        if ($collected === [] && ! str_contains($line, 'if ($isPhp) {')) {
+            continue;
+        }
+
+        $collected[] = $line;
+        $depth += substr_count($line, '{') - substr_count($line, '}');
+
+        if ($depth === 0) {
+            break;
+        }
+    }
+
+    assertTrue($collected !== [] && $depth === 0, 'The tracked-PHP finalization block must be locatable for self-inspection.');
+
+    return implode("\n", $collected);
+}
+
 $repositoryRoot = dirname(__DIR__, 2);
 $guard = $repositoryRoot.'/bin/composer-policy';
 $guardContents = file_get_contents($guard);
@@ -3729,20 +3761,93 @@ PHP;
         }
     }
 
-    $applicationIndirectRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
-        'app/IndirectComposer.php' => "<?php\n\n\$launcher = 'system';\n\$launcher('composer install');\n",
+    $trackedDispatchForms = [
+        'variable function dispatch' => "\$launcher = 'system';\n\$launcher('{$composerWord} install');",
+        'popen dispatch' => "popen('{$composerWord} update', 'r');",
+        'callable dispatch' => "call_user_func('system', '{$composerWord} install');",
+    ];
+
+    foreach (['app/IndirectComposer.php', 'tools/IndirectComposer.php'] as $trackedPath) {
+        foreach ($trackedDispatchForms as $form => $program) {
+            $source = "<?php\n\n{$program}\n";
+            $trackedRoot = initializeFixtureRepositoryFiles($repositoryRoot, [$trackedPath => $source]);
+
+            try {
+                $records = auditRoutes($trackedRoot);
+                $fallback = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === $trackedPath
+                    && $record['executable'] === 'unclassified-php'
+                    && $record['classification'] === 'unclassified'));
+                assertTrue(count($fallback) === 1, "A tracked {$trackedPath} {$form} must produce exactly one source-level unclassified PHP fallback.");
+                assertTrue($fallback[0]['line'] > 0 && $fallback[0]['line'] <= substr_count($source, "\n"), "A tracked {$trackedPath} {$form} record must carry a finite positive staged source line.");
+                assertTrue(str_contains($fallback[0]['segment'], $composerWord) && str_contains($fallback[0]['logical'], $composerWord), "A tracked {$trackedPath} {$form} record must retain invocation-bearing raw segment and source provenance.");
+                assertTrue(routeAuditFailures($records) !== [], "A tracked {$trackedPath} {$form} must fail the route audit without executing fixture PHP.");
+                assertTrue(! file_exists($trackedRoot.'/composer.lock') && ! is_dir($trackedRoot.'/vendor'), "A tracked {$trackedPath} {$form} fixture must be inspected as text with no runtime side effect.");
+            } finally {
+                removeDirectory($trackedRoot);
+            }
+        }
+    }
+
+    $directApplicationRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'app/DirectComposer.php' => "<?php\n\nsystem('{$composerWord} install');\n",
     ]);
 
     try {
-        $records = auditRoutes($applicationIndirectRoot);
-        $fallback = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'app/IndirectComposer.php'
-            && $record['executable'] === 'unclassified-php'
+        $records = auditRoutes($directApplicationRoot);
+        $direct = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'app/DirectComposer.php'
+            && $record['executable'] === 'composer'
             && $record['classification'] === 'unclassified'));
-        assertTrue(count($fallback) === 1, 'An application variable-function Composer dispatcher must produce exactly one source-level unclassified PHP fallback.');
-        assertTrue($fallback[0]['line'] > 0 && str_contains($fallback[0]['segment'], 'composer install'), 'Application fallback evidence must retain the staged source line and raw command-bearing program.');
-        assertTrue(routeAuditFailures($records) !== [], 'An application variable-function Composer dispatcher must fail the route audit without executing fixture PHP.');
+        assertTrue(count($direct) === 1, 'A direct literal application Composer launch must remain classified by the bounded extractor and must not be treated as supported.');
+        assertTrue(routeAuditFailures($records) !== [], 'A direct literal application Composer launch must fail the route audit.');
     } finally {
-        removeDirectory($applicationIndirectRoot);
+        removeDirectory($directApplicationRoot);
+    }
+
+    $contractOnlyRoot = initializeFixtureRepositoryFiles($repositoryRoot, []);
+
+    try {
+        assertTrue(auditRoutes($contractOnlyRoot) === [], 'The tracked guard and trusted command contract must produce no route-audit records on their own.');
+    } finally {
+        removeDirectory($contractOnlyRoot);
+    }
+
+    $contractSource = (string) file_get_contents($repositoryRoot.'/tools/composer/ComposerPolicyCommandContract.php');
+    assertTrue(str_contains($contractSource, 'a canonical Composer command is required')
+        && str_contains($contractSource, 'Composer command aliases are forbidden'), 'The trusted command contract must retain the reason strings used as no-record controls.');
+
+    $noRecordPhpSources = [
+        'line comment marker' => "<?php\n\n// Operators run {$composerWord} install through bin/composer-policy.\n\$bootstrapped = true;\n",
+        'docblock marker' => "<?php\n\n/**\n * Dependency changes go through {$composerWord} update via bin/composer-policy install.\n */\nfinal class DocumentedKernel\n{\n}\n",
+        'returned contract reason strings' => "<?php\n\nfinal class ReasonCarrier\n{\n    public function canonical(): string\n    {\n        return 'a canonical Composer command is required';\n    }\n\n    public function alias(): string\n    {\n        return 'Composer command aliases are forbidden';\n    }\n}\n",
+        'thrown contract reason strings' => "<?php\n\nfinal class ThrowingContract\n{\n    public function decide(array \$tokens): void\n    {\n        throw new RuntimeException('a canonical Composer command is required');\n    }\n\n    public function reject(array \$tokens): void\n    {\n        throw new InvalidArgumentException('Composer command aliases are forbidden');\n    }\n}\n",
+        'arbitrary prose passed to calls' => "<?php\n\ndefine('LARAVEL_START', microtime(true));\n\n\$notice = sprintf('Operators must run Composer through bin/composer-policy before deploying.');\n\$hint = sprintf('The %s manifest is validated in CI.', 'composer.json');\ntrigger_error('Direct Composer usage is reviewed by the maintainer.', E_USER_NOTICE);\n",
+    ];
+
+    foreach ($noRecordPhpSources as $control => $controlSource) {
+        foreach (['app/Console/Kernel.php', 'public/index.php', 'tools/composer/Notes.php'] as $controlPath) {
+            $controlRoot = initializeFixtureRepositoryFiles($repositoryRoot, [$controlPath => $controlSource]);
+
+            try {
+                $controlRecords = array_values(array_filter(auditRoutes($controlRoot), static fn (array $record): bool => $record['path'] === $controlPath));
+                assertTrue($controlRecords === [], "A {$control} in {$controlPath} must stay outside the tracked-PHP detector.");
+            } finally {
+                removeDirectory($controlRoot);
+            }
+        }
+    }
+
+    $literalCodeStringRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'app/Console/Kernel.php' => "<?php\n\n// Operators run {$composerWord} install through bin/composer-policy.\n\$dispatch = 'shell_exec';\n\$dispatch('{$composerWord} install');\n",
+    ]);
+
+    try {
+        $records = auditRoutes($literalCodeStringRoot);
+        $fallback = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'app/Console/Kernel.php'
+            && $record['executable'] === 'unclassified-php'));
+        assertTrue(count($fallback) === 1, 'A literal command-shaped code string must remain detectable even when the same file also carries comment prose.');
+        assertTrue(! str_starts_with(ltrim($fallback[0]['segment']), '//'), 'Command-shaped PHP provenance must point at executable source, not at the comment marker.');
+    } finally {
+        removeDirectory($literalCodeStringRoot);
     }
 
     $unmarkedPhpRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
@@ -3774,9 +3879,47 @@ PHP;
     assertParserRejects(static fn (): array => commandChainSegments("echo 'unterminated"), 'unterminated quote');
     assertParserRejects(static fn (): array => commandChainSegments('echo dangling'.'\\'), 'dangling escape');
 
+    $boundedLaunchProbe = "<?php\n\nproc_open('{$composerWord} install', [], \$pipes);\nexec('{$composerWord} install');\nsystem('{$composerWord} install');\npassthru('{$composerWord} install');\nshell_exec('{$composerWord} install');\n";
+    assertTrue(count(phpProcessLaunches($boundedLaunchProbe)) === 5, 'The direct PHP extractor must retain exactly its five known launch APIs.');
+
+    $indirectLaunchProbe = "<?php\n\npopen('{$composerWord} install', 'r');\ncall_user_func('system', '{$composerWord} install');\n\$launcher = 'system';\n\$launcher('{$composerWord} install');\n";
+    assertTrue(phpProcessLaunches($indirectLaunchProbe) === [], 'Indirect dispatch must stay outside the direct PHP extractor instead of widening it.');
+    assertTrue(str_contains(auditFunctionSource('phpProcessLaunches'), "\$functions = ['proc_open', 'exec', 'system', 'passthru', 'shell_exec'];"), 'The direct PHP extractor must keep its literal bounded API list.');
+    assertTrue(str_contains(auditFunctionSource('parseInvocation'), 'ComposerPolicyCommandContract::decide('), 'Direct literal guarded forms must keep classifying through ComposerPolicyCommandContract.');
+
+    $phpFinalization = phpFinalizationSource();
+    assertTrue(substr_count($phpFinalization, 'phpCommandShapedProgram(') === 1, 'The token-aware helper must be the sole PHP program-bearing decision seam.');
+    assertTrue(str_contains(auditFunctionSource('phpCommandShapedProgram'), 'token_get_all('), 'The PHP program-bearing helper must decide from PHP tokens.');
+
+    foreach (['routeAuditMarker(', 'markerSourceLine(', 'containsComposerExecutableText(', 'containsComposerOrEvaluatorText(', 'preg_match(', 'isSupportedProductionRoute('] as $rejectedSeam) {
+        assertTrue(! str_contains($phpFinalization, $rejectedSeam), "Tracked-PHP finalization must not reintroduce the seam {$rejectedSeam}.");
+    }
+
+    assertTrue(str_contains($phpFinalization, 'isTrustedPhpAuditSource($path)'), 'Tracked-PHP finalization must retain its explicit trusted-source exclusion.');
+
+    foreach (['tests/', '.planning/', 'vendor/', 'bootstrap/cache/', 'storage/framework/'] as $excludedTree) {
+        assertTrue(isTrustedPhpAuditSource($excludedTree.'Probe.php'), "Tracked-PHP exclusions must retain {$excludedTree}.");
+    }
+
+    assertTrue(isTrustedPhpAuditSource('bin/composer-policy'), 'The policy guard itself must remain an explicit audit exclusion.');
+
+    foreach (['app/Probe.php', 'app/Console/Kernel.php', 'tools/Probe.php', 'tools/composer/Probe.php', 'public/index.php'] as $trackedProductionPhp) {
+        assertTrue(! isTrustedPhpAuditSource($trackedProductionPhp), "Tracked application and tool source must not be allowlisted out of the audit: {$trackedProductionPhp}.");
+    }
+
+    foreach (['composer.json', 'composer.lock', 'tools/composer/composer-2.10.2.phar', 'tools/composer/composer-2.10.2.phar.sha256'] as $nonSourcePath) {
+        assertTrue(routeSourceKind($nonSourcePath, '') === 'non-source', "Manifest, lockfile, and PHAR/digest material must retain non-source handling: {$nonSourcePath}.");
+    }
+
     $productionRecords = auditRoutes($repositoryRoot);
     assertTrue(routeAuditFailures($productionRecords, true) === [], 'Production route audit must pass using only tracked records.');
     assertTrue(! (bool) array_filter($productionRecords, static fn (array $record): bool => str_contains($record['path'], 'sendportal-composer-route-')), 'Production route evidence must not include temporary fixture paths.');
+    assertTrue(count($productionRecords) === 3, 'Production route audit must retain exactly three tracked Composer records.');
+    $guardedProductionRecords = array_values(array_filter($productionRecords, static fn (array $record): bool => $record['classification'] === 'supported'
+        && $record['executable'] === 'guard'
+        && ($record['path'] === 'README.md' || str_starts_with($record['path'], '.github/workflows/'))));
+    assertTrue(count($guardedProductionRecords) === 3, 'The three production records must be guarded CI and README evidence.');
+    assertTrue(! file_exists($repositoryRoot.'/composer.lock') && ! is_dir($repositoryRoot.'/vendor'), 'The dependency-free route audit must run with no root lockfile and no vendor tree.');
 } finally {
     foreach ($temporaryRoots as $temporaryRoot) {
         removeDirectory($temporaryRoot);
