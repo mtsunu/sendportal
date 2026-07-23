@@ -1,18 +1,11 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-reviewed: 2026-07-23T11:59:58Z
+reviewed: 2026-07-23T14:04:00Z
 depth: standard
-files_reviewed: 9
+files_reviewed: 2
 files_reviewed_list:
   - .github/workflows/ci.yml
-  - README.md
-  - bin/composer-policy
-  - composer.json
   - tests/Composer/ComposerPolicyGuardTest.php
-  - tests/Composer/ComposerPolicyLivePackagistTest.php
-  - tools/composer/ComposerPolicyCommandContract.php
-  - tools/composer/composer-2.10.2.phar
-  - tools/composer/composer-2.10.2.phar.sha256
 findings:
   critical: 2
   warning: 1
@@ -23,64 +16,50 @@ status: issues_found
 
 # Phase 01: Code Review Report
 
-**Reviewed:** 2026-07-23T11:59:58Z
+**Reviewed:** 2026-07-23T14:04:00Z
 **Depth:** standard
-**Files Reviewed:** 9
+**Files Reviewed:** 2
 **Status:** issues_found
 
 ## Summary
 
-The pinned Composer distribution's recorded SHA-256 matches the checked-in PHAR, the guard retains the exact policy and isolated Composer home, and the declared lint, focused, full-suite, and production route-audit commands pass. The new bounded evaluator parser is nevertheless fail-open for valid shell compound forms: a direct Composer command nested in a function or brace group produces no audit record or failure. Inline PHP launched by a workflow has the same fail-open path. These defeat the Phase 01 supported-route security control and must be fixed before shipping.
+Plan 01-09 correctly adds a dependency-free CI gate before the guarded install and closes the exact bare brace/function and bare `php -r` cases in its fixtures. The bounded route audit remains fail-open for valid wrapper/option forms of inline PHP and for Composer-bearing dynamic launch variables. In both cases a supported workflow can execute a direct Composer mutation while `auditRoutes()` returns no record and `routeAuditFailures()` remains empty.
 
 ## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: Compound shell syntax hides nested evaluators from the route audit
+### CR-01: PHP CLI options and supported wrappers bypass the inline `-r` audit
 
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:464-555, 898-1169, 1425-1523`
+**File:** `tests/Composer/ComposerPolicyGuardTest.php:1568-1589, 1684-1692, 1747-1752`
 **Classification:** BLOCKER
 
-**Issue:** `commandChainSegments()` splits parentheses but not brace groups, and `parseInvocation()` only recognizes an evaluator when it is the executable after its small wrapper set. Therefore valid workflow shell such as:
+**Issue:** `inlinePhpProgram()` recognizes only a segment whose first two tokens are exactly `php` and `-r`. Valid PHP invocations such as `php -n -r 'system("composer install");'` and supported existing wrappers such as `env -i php -r 'system("composer install");'`, `command php -r ...`, `sudo -n php -r ...`, and `timeout 30 php -r ...` therefore bypass the inline parser. `parseInvocation()` then deliberately returns `null` for `-r`, while the generic Composer-text detector sees only the outer wrapper/PHP executable. A staged supported workflow probe produced `records: []` and `failures: []` for every listed form, although `php -n -r` and `env -i php -r` execute inline code.
 
-```sh
-function runner() { bash -c 'composer install'; }
-runner
-```
+**Fix:** Normalize the same accepted wrapper and PHP option grammar before deciding whether a segment is inline PHP. Once a `-r`/`--run` boundary is found, classify its single literal program; for every unsupported or malformed argv shape that still reaches `-r`, emit one `unclassified-php` record whenever it is Composer/evaluator-bearing. Add staged fixtures for at least `php -n -r`, `php -d key=value -r`, and `env -i php -r`, requiring nonempty failure evidence for direct Composer.
 
-or `{ bash -c 'composer install'; }` reaches neither evaluator recursion nor the unclassified fallback. A disposable tracked workflow fixture returned `records: []` and `failures: []`, even though it executes a direct Composer install. This directly violates the plan's requirement that nested literal evaluator payloads cannot disappear.
+### CR-02: Composer-bearing variables feeding an inline process launch disappear
 
-**Fix:** Before treating an invocation as absent, recursively handle supported compound forms (at minimum `{ ...; }` and function bodies) or emit an `unclassified` record whenever a supported production scalar contains Composer/evaluator text inside an unparsed compound construct. Add regression fixtures for direct and guarded commands in brace groups and function bodies, requiring a nonempty failure for the direct form.
-
-### CR-02: Workflow `php -r` can execute direct Composer with zero audit evidence
-
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:1067-1122, 1207-1257, 1425-1447`
+**File:** `tests/Composer/ComposerPolicyGuardTest.php:1600-1601, 1631-1638, 1668-1670`
 **Classification:** BLOCKER
 
-**Issue:** `parseInvocation()` returns `null` immediately for PHP's `-r` option, treating it as non-executing, while `containsComposerExecutableText()` only inspects the outer executable and not the inline PHP program. Consequently a tracked workflow scalar such as `php -r 'system("composer install");'` yields `records: []` and `failures: []`. The command runs a direct dependency mutation but bypasses the documented fail-closed route audit.
+**Issue:** The complete inline program is marked Composer-bearing at line 1600, but a dynamic launch is reported only when that launch expression itself contains Composer text. Consequently a valid program such as `php -r '$command = "composer install"; system($command);'` has a Composer-bearing program and a dynamic `system($command)` launch, yet line 1633 does not record it because `$launch['composer_bearing']` is false for `$command`. The loop finishes with no records, so the route audit passes while the workflow executes direct Composer. The same zero-record result occurs with `exec($command)` and with a variable containing `bash -c 'composer install'`.
 
-**Fix:** Treat `php -r` as an executable code boundary. Parse a bounded literal program for the same process-launch calls already covered in PHP files, or fail closed with an `unclassified` record whenever its literal program contains Composer/guard text; dynamic code must also be unclassified. Add direct and guarded `php -r` workflow fixtures.
+**Fix:** When a literal inline program is Composer/evaluator-bearing, a dynamic or unclassifiable process-launch expression must fail closed even if that individual expression lacks the literal string. For example, return one `unclassified-php` record when `$programBearing && $launch['tokens'] === null`, and add a final `$programBearing && $records === []` safety net. Add staged variable-assignment fixtures for `system($command)` and `exec($command)` and assert that each produces a failure.
 
 ## Warnings
 
-### WR-01: CI never executes the standalone security-route regression suite
+### WR-01: Inline launch-limit regression uses the evaluator limit constant
 
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/.github/workflows/ci.yml:40-53`
+**File:** `tests/Composer/ComposerPolicyGuardTest.php:2700`
 **Classification:** WARNING
 
-**Issue:** The workflow installs dependencies and runs PHPUnit, but neither `ComposerPolicyGuardTest.php` nor its `--route-audit` mode is a PHPUnit test. The regressions that should have caught CR-01 and CR-02 can therefore remain green locally while every CI run passes.
+**Issue:** The inline-PHP launch-count fixture is built with `MAX_ROUTE_EVALUATOR_PAYLOADS + 1` instead of `MAX_ROUTE_INLINE_PHP_LAUNCHES + 1`. Both are currently 32, so the test passes, but a later independent limit adjustment can leave this regression test below the actual inline limit and stop exercising the intended fail-closed path.
 
-**Fix:** Add a dependency-free step before installation, for example:
-
-```yaml
-- name: Verify Composer policy routes
-  run: |
-    php tests/Composer/ComposerPolicyGuardTest.php
-    php tests/Composer/ComposerPolicyGuardTest.php --route-audit
-```
+**Fix:** Build the fixture with `MAX_ROUTE_INLINE_PHP_LAUNCHES + 1`.
 
 ---
 
-_Reviewed: 2026-07-23T11:59:58Z_
+_Reviewed: 2026-07-23T14:04:00Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
