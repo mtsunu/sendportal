@@ -2295,6 +2295,49 @@ PHP;
         }
     }
 
+    $compoundDirect = 'composer'.' install';
+    $compoundGuarded = 'php bin/'.'composer-policy install';
+
+    foreach ([
+        'brace direct payload' => ['{ bash -c \' '.$compoundDirect.' \'; }', 'composer', 'install', 'unsupported'],
+        'brace guarded payload' => ['{ bash -c \' '.$compoundGuarded.' \'; }', 'guard', 'install', 'supported'],
+        'function direct payload' => ['runner() { bash -c \' '.$compoundDirect.' \'; }', 'composer', 'install', 'unsupported'],
+        'function guarded payload' => ['runner() { bash -c \' '.$compoundGuarded.' \'; }', 'guard', 'install', 'supported'],
+    ] as $scenario => [$command, $executable, $operation, $classification]) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $matching = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === $executable
+                && $record['operation'] === $operation
+                && $record['classification'] === $classification));
+            assertTrue($matching !== [], "Fixture {$scenario} must preserve nested {$classification} route evidence.");
+
+            if ($classification === 'unsupported') {
+                assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+            }
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    foreach ([
+        'unmatched brace' => '{ bash -c \''.$compoundDirect.'\';',
+        'malformed function' => 'runner( { bash -c \''.$compoundDirect.'\'; }',
+        'dynamic brace body' => '{ bash -c "$'.'PAYLOAD"; }',
+    ] as $scenario => $command) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['classification'] === 'unclassified'));
+            assertTrue(count($unclassified) === 1, "Fixture {$scenario} must produce exactly one compound unclassified record.");
+            assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
     $directInstall = 'composer'.' install';
     $directUpdate = 'composer'.' update';
     $guardedInstall = 'php bin/'.'composer-policy install';
