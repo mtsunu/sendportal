@@ -8,6 +8,8 @@ const COMPOSER_PHAR_NAME = 'composer-2.10.2.phar';
 const COMPOSER_RECORD_NAME = 'composer-2.10.2.phar.sha256';
 const COMPOSER_RELEASE_URL = 'https://getcomposer.org/download/2.10.2/composer.phar';
 const COMPOSER_CHECKSUM_VERIFICATION = 'separately downloaded official SHA-256 from https://getcomposer.org/download/2.10.2/composer.phar.sha256sum';
+const COMPOSER_PREFLIGHT_CHANNEL_LIMIT = 262144;
+const COMPOSER_PREFLIGHT_TIMEOUT_SECONDS = 10.0;
 
 function reject(string $message): never
 {
@@ -19,13 +21,106 @@ function reject(string $message): never
 /**
  * @param list<string> $command
  * @param array<string, string> $environment
- * @return array{int, string}
+ * @return array{status: int, stdout: string, stderr: string}
  */
-function runComposer(array $command, string $repositoryRoot, array $environment): array
+function runComposerProbe(array $command, string $repositoryRoot, array $environment): array
 {
     $process = proc_open(
         $command,
-        [1 => ['pipe', 'w'], 2 => ['redirect', 1]],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        $repositoryRoot,
+        $environment,
+    );
+
+    if (! is_resource($process)) {
+        reject('Composer preflight failed.');
+    }
+
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+    $stdout = '';
+    $stderr = '';
+    $deadline = microtime(true) + COMPOSER_PREFLIGHT_TIMEOUT_SECONDS;
+    $lastStatus = null;
+    $failed = false;
+
+    while (true) {
+        $read = [];
+
+        foreach ([1, 2] as $descriptor) {
+            if (! feof($pipes[$descriptor])) {
+                $read[] = $pipes[$descriptor];
+            }
+        }
+
+        if ($read !== []) {
+            $write = null;
+            $except = null;
+            @stream_select($read, $write, $except, 0, 100000);
+
+            foreach ($read as $stream) {
+                $chunk = stream_get_contents($stream);
+
+                if ($stream === $pipes[1]) {
+                    $stdout .= $chunk;
+                    $failed = strlen($stdout) > COMPOSER_PREFLIGHT_CHANNEL_LIMIT;
+                } else {
+                    $stderr .= $chunk;
+                    $failed = strlen($stderr) > COMPOSER_PREFLIGHT_CHANNEL_LIMIT;
+                }
+
+                if ($failed) {
+                    break 2;
+                }
+            }
+        }
+
+        $lastStatus = proc_get_status($process);
+
+        if (! $lastStatus['running'] && feof($pipes[1]) && feof($pipes[2])) {
+            break;
+        }
+
+        if (microtime(true) >= $deadline) {
+            $failed = true;
+
+            break;
+        }
+    }
+
+    if ($failed) {
+        proc_terminate($process);
+    }
+
+    foreach ([1, 2] as $descriptor) {
+        fclose($pipes[$descriptor]);
+    }
+
+    $closedStatus = proc_close($process);
+
+    if ($failed) {
+        reject('Composer preflight failed.');
+    }
+
+    $exitStatus = $closedStatus;
+
+    if ($exitStatus < 0 && is_array($lastStatus) && is_int($lastStatus['exitcode']) && $lastStatus['exitcode'] >= 0) {
+        $exitStatus = $lastStatus['exitcode'];
+    }
+
+    return ['status' => $exitStatus, 'stdout' => $stdout, 'stderr' => $stderr];
+}
+
+/**
+ * @param list<string> $command
+ * @param array<string, string> $environment
+ */
+function delegateComposer(array $command, string $repositoryRoot, array $environment): int
+{
+    $process = proc_open(
+        $command,
+        [0 => STDIN, 1 => STDOUT, 2 => STDERR],
         $pipes,
         $repositoryRoot,
         $environment,
@@ -35,10 +130,7 @@ function runComposer(array $command, string $repositoryRoot, array $environment)
         reject('Composer distribution unavailable.');
     }
 
-    $output = stream_get_contents($pipes[1]);
-    fclose($pipes[1]);
-
-    return [proc_close($process), $output];
+    return proc_close($process);
 }
 
 function removeComposerHome(string $path): void
@@ -315,20 +407,16 @@ if (in_array($commandDecision['command'], ['install', 'update'], true) && ! hasE
 $composerPath = verifiedComposerPath($distribution);
 $repositoryRoot = $distribution['root'];
 
-[$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
+$versionProbe = runComposerProbe([PHP_BINARY, $composerPath, '--version', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
 
-if ($versionStatus !== 0 || ! hasExactComposerVersion($versionOutput)) {
+if ($versionProbe['status'] !== 0 || ! hasExactComposerVersion($versionProbe['stdout']."\n".$versionProbe['stderr'])) {
     reject('Composer distribution version verification failed.');
 }
 
-[$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
+$policyProbe = runComposerProbe([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction'], $repositoryRoot, $isolatedEnvironment['environment']);
 
-if ($policyStatus !== 0) {
+if ($policyProbe['status'] !== 0) {
     reject('Composer distribution policy capability unavailable.');
 }
 
-[$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot, $isolatedEnvironment['environment']);
-
-fwrite(STDOUT, $delegatedOutput);
-
-exit($exitStatus);
+exit(delegateComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot, $isolatedEnvironment['environment']));

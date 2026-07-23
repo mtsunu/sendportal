@@ -47,12 +47,65 @@ function runCommand(array $command, array $environment, string $workingDirectory
         fail('Could not start the Composer policy guard.');
     }
 
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+    $stdout = '';
+    $stderr = '';
+    $deadline = microtime(true) + 15.0;
+    $lastStatus = null;
+
+    while (true) {
+        $read = [];
+
+        foreach ([1, 2] as $descriptor) {
+            if (! feof($pipes[$descriptor])) {
+                $read[] = $pipes[$descriptor];
+            }
+        }
+
+        if ($read !== []) {
+            $write = null;
+            $except = null;
+            @stream_select($read, $write, $except, 0, 100000);
+
+            foreach ($read as $stream) {
+                $chunk = stream_get_contents($stream);
+
+                if ($stream === $pipes[1]) {
+                    $stdout .= $chunk;
+                } else {
+                    $stderr .= $chunk;
+                }
+
+                if (strlen($stdout) > 8388608 || strlen($stderr) > 8388608) {
+                    proc_terminate($process);
+                    fail('Composer policy test subprocess exceeded the per-channel output limit.');
+                }
+            }
+        }
+
+        $lastStatus = proc_get_status($process);
+
+        if (! $lastStatus['running'] && feof($pipes[1]) && feof($pipes[2])) {
+            break;
+        }
+
+        if (microtime(true) >= $deadline) {
+            proc_terminate($process);
+            fail('Composer policy test subprocess timed out.');
+        }
+    }
+
     fclose($pipes[1]);
     fclose($pipes[2]);
+    $closedStatus = proc_close($process);
+    $exitStatus = $closedStatus;
 
-    return ['status' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
+    if ($exitStatus < 0 && is_array($lastStatus) && is_int($lastStatus['exitcode']) && $lastStatus['exitcode'] >= 0) {
+        $exitStatus = $lastStatus['exitcode'];
+    }
+
+    return ['status' => $exitStatus, 'stdout' => $stdout, 'stderr' => $stderr];
 }
 
 /**
@@ -199,15 +252,20 @@ file_put_contents((string) getenv('TRUSTED_COMPOSER_MARKER'), json_encode([
 
 if (in_array('--version', \$argv, true)) {
     echo "Composer version {$version}\\n";
-    exit(0);
-}
 
-if ((\$argv[1] ?? null) === 'policy' && in_array('--help', \$argv, true)) {
     if (getenv('SYNTHETIC_IO_MODE') === 'preflight-overflow') {
         fwrite(STDOUT, str_repeat('P', 262145));
         fwrite(STDERR, str_repeat('E', 262145));
     }
 
+    if (getenv('SYNTHETIC_IO_MODE') === 'preflight-timeout') {
+        sleep(20);
+    }
+
+    exit(0);
+}
+
+if ((\$argv[1] ?? null) === 'policy' && in_array('--help', \$argv, true)) {
     exit(0);
 }
 
@@ -1664,16 +1722,18 @@ try {
     assertTrue(strlen($largeResult['stdout']) === 1048576 && hash('sha256', $largeResult['stdout']) === hash('sha256', $expectedStdout), 'Large delegated stdout must retain its exact byte count and digest.');
     assertTrue(strlen($largeResult['stderr']) === 1048576 && hash('sha256', $largeResult['stderr']) === hash('sha256', $expectedStderr), 'Large delegated stderr must retain its exact byte count and digest.');
 
-    $preflightRoot = createTemporaryRepository($repositoryRoot);
-    $temporaryRoots[] = $preflightRoot;
-    $preflightTrustedMarker = $preflightRoot.'/trusted.marker';
-    $preflightShadowMarker = $preflightRoot.'/shadow.marker';
-    $preflightEnvironment = assertionEnvironment($preflightRoot, $preflightShadowMarker, $preflightTrustedMarker);
-    $preflightEnvironment['SYNTHETIC_IO_MODE'] = 'preflight-overflow';
-    writeSyntheticDistribution($preflightRoot);
-    $preflightResult = runCommand([PHP_BINARY, $preflightRoot.'/bin/composer-policy', 'validate'], $preflightEnvironment, $preflightRoot);
-    assertTrue($preflightResult['status'] !== 0 && str_contains($preflightResult['stderr'], 'Composer preflight failed.'), 'A preflight channel cap overflow must fail with the fixed diagnostic.');
-    assertOnlyVersionProbeRan($preflightTrustedMarker, $preflightShadowMarker, 'Preflight overflow');
+    foreach (['preflight-overflow' => 'channel cap overflow', 'preflight-timeout' => 'timeout'] as $mode => $scenario) {
+        $preflightRoot = createTemporaryRepository($repositoryRoot);
+        $temporaryRoots[] = $preflightRoot;
+        $preflightTrustedMarker = $preflightRoot.'/trusted.marker';
+        $preflightShadowMarker = $preflightRoot.'/shadow.marker';
+        $preflightEnvironment = assertionEnvironment($preflightRoot, $preflightShadowMarker, $preflightTrustedMarker);
+        $preflightEnvironment['SYNTHETIC_IO_MODE'] = $mode;
+        writeSyntheticDistribution($preflightRoot);
+        $preflightResult = runCommand([PHP_BINARY, $preflightRoot.'/bin/composer-policy', 'validate'], $preflightEnvironment, $preflightRoot);
+        assertTrue($preflightResult['status'] !== 0 && str_contains($preflightResult['stderr'], 'Composer preflight failed.'), "A preflight {$scenario} must fail with the fixed diagnostic.");
+        assertOnlyVersionProbeRan($preflightTrustedMarker, $preflightShadowMarker, "Preflight {$scenario}");
+    }
 
     foreach (['stderr-first', 'stdout-first'] as $order) {
         $helperProgram = <<<'PHP'
