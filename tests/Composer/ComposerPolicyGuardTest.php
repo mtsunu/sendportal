@@ -2091,6 +2091,32 @@ PHP;
         removeDirectory($literalMultiCommandRoot);
     }
 
+    $literalBashDirect = implode(' ', ['bash', '-c', "'composer install'"]);
+    $literalBashGuarded = implode(' ', ['bash', '-c', "'php bin/composer-policy install'"]);
+    $literalBashQuoted = implode(' ', ['bash', '-c', "'composer install --prefer-dist \\".'$SAFE'."'"]);
+
+    foreach ([
+        'literal direct bash payload' => [$literalBashDirect, 'composer', 'install', 'unsupported'],
+        'literal guarded bash payload' => [$literalBashGuarded, 'guard', 'install', 'supported'],
+        'literal quoted and escaped bash payload' => [$literalBashQuoted, 'composer', 'install', 'unsupported'],
+    ] as $scenario => [$command, $executable, $operation, $classification]) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: {$command}\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $matching = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === $executable
+                && $record['operation'] === $operation
+                && $record['classification'] === $classification));
+            assertTrue($matching !== [], "Fixture {$scenario} must produce a nested {$classification} record.");
+
+            if ($classification === 'unsupported') {
+                assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+            }
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
     $unknownShellRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         'scripts/dependencies.sh' => "#!/bin/sh\ncomposer --bogus install\n",
     ]);
