@@ -3368,6 +3368,67 @@ PHP;
         }
     }
 
+    $composerScriptFixture = json_encode([
+        'scripts' => [
+            'post-install-cmd' => [
+                'composer install',
+                '@composer update',
+                '@php bin/composer-policy install',
+                'php bin/composer-policy update',
+            ],
+            'post-autoload-dump' => [
+                'Illuminate\\Foundation\\ComposerScripts::postAutoloadDump',
+                '@php artisan package:discover --ansi',
+            ],
+            'post-root-package-install' => '@php -r "file_exists(\'.env\') || copy(\'.env.example\', \'.env\');"',
+        ],
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n";
+    $composerScriptRoot = initializeFixtureRepositoryFiles($repositoryRoot, ['composer.json' => $composerScriptFixture]);
+
+    try {
+        $records = auditRoutes($composerScriptRoot);
+        $direct = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'composer.json'
+            && $record['logical'] === 'post-install-cmd'
+            && $record['classification'] === 'unsupported'
+            && $record['executable'] === 'composer'
+            && in_array($record['operation'], ['install', 'update'], true)));
+        $guarded = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'composer.json'
+            && $record['logical'] === 'post-install-cmd'
+            && $record['classification'] === 'supported'
+            && $record['executable'] === 'guard'
+            && in_array($record['operation'], ['install', 'update'], true)));
+        assertTrue(count($direct) === 2, 'Direct and @composer post-install handlers must each retain unsupported Composer-script provenance.');
+        assertTrue(count($guarded) === 2, 'Literal direct and @php guarded Composer-script handlers must use ComposerPolicyCommandContract.');
+        assertTrue((bool) array_filter($direct, static fn (array $record): bool => $record['chain'] === 0 && $record['line'] > 0 && $record['segment'] === 'composer install'), 'Direct Composer-script evidence must retain ordinal, physical line, and raw handler text.');
+        assertTrue((bool) array_filter($direct, static fn (array $record): bool => $record['chain'] === 1 && $record['segment'] === '@composer update'), '@composer evidence must retain its handler ordinal and raw handler text.');
+        assertTrue(routeAuditFailures($records) !== [], 'Direct Composer-script handlers must fail the route audit.');
+        assertTrue(! (bool) array_filter($records, static fn (array $record): bool => $record['logical'] !== 'post-install-cmd'), 'Documented Laravel Composer-script handlers must remain non-candidates.');
+    } finally {
+        removeDirectory($composerScriptRoot);
+    }
+
+    $malformedComposerScriptRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'composer.json' => json_encode([
+            'scripts' => [
+                'post-install-cmd' => ['handler' => 'composer install'],
+            ],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n",
+    ]);
+
+    try {
+        $records = auditRoutes($malformedComposerScriptRoot);
+        $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'composer.json'
+            && $record['logical'] === 'post-install-cmd'
+            && $record['chain'] === 0
+            && $record['executable'] === 'unclassified-composer-script'
+            && $record['classification'] === 'unclassified'));
+        assertTrue(count($unclassified) === 1, 'A marker-bearing Composer-script handler outside the finite shape must fail closed with event and handler provenance.');
+        assertTrue($unclassified[0]['line'] > 0 && str_contains($unclassified[0]['segment'], 'composer install'), 'Malformed Composer-script evidence must retain the physical source line and raw handler value.');
+        assertTrue(routeAuditFailures($records) !== [], 'A malformed marker-bearing Composer-script handler must fail the route audit.');
+    } finally {
+        removeDirectory($malformedComposerScriptRoot);
+    }
+
     $phpFixture = <<<'PHP'
 <?php
 
