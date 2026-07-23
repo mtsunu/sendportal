@@ -266,6 +266,12 @@ if (in_array('--version', \$argv, true)) {
 }
 
 if ((\$argv[1] ?? null) === 'policy' && in_array('--help', \$argv, true)) {
+    if (getenv('SYNTHETIC_IO_MODE') === 'mutate-manifest-during-policy-probe') {
+        \$manifest = json_decode((string) file_get_contents(getcwd().'/composer.json'), true, 512, JSON_THROW_ON_ERROR);
+        \$manifest['config']['policy']['advisories']['block'] = false;
+        file_put_contents(getcwd().'/composer.json', json_encode(\$manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\\n");
+    }
+
     exit(0);
 }
 
@@ -503,7 +509,7 @@ function commandChainSegments(string $logicalLine, bool $strict = true): array
             continue;
         }
 
-        if ($quote === null && in_array($character, ['&', '|', ';', '(', ')'], true)) {
+        if ($quote === null && in_array($character, ['&', '|', ';', '(', ')', "\n", "\r"], true)) {
             if (($character === '&' || $character === '|') && ($logicalLine[$index + 1] ?? null) === $character) {
                 ++$index;
             }
@@ -1119,16 +1125,7 @@ function classifyRoute(string $path, string $executable, bool $contractAllowed =
         return ['classification' => 'non-production', 'rationale' => 'planning, history, research, and test coverage are not production dependency routes'];
     }
 
-    $supported = $path === 'README.md'
-        || str_starts_with($path, '.github/workflows/')
-        || str_starts_with($path, 'scripts/')
-        || str_starts_with($path, 'bin/')
-        || str_starts_with($path, 'docker/')
-        || str_starts_with($path, 'containers/')
-        || str_starts_with($path, 'Dockerfile')
-        || $path === 'Makefile';
-
-    if (! $supported) {
+    if (! isSupportedProductionRoute($path)) {
         return ['classification' => 'unclassified', 'rationale' => 'Composer mutation command has no approved production route classification'];
     }
 
@@ -1141,6 +1138,18 @@ function classifyRoute(string $path, string $executable, bool $contractAllowed =
     }
 
     return ['classification' => 'supported', 'rationale' => 'this command-chain segment invokes the repository guard'];
+}
+
+function isSupportedProductionRoute(string $path): bool
+{
+    return $path === 'README.md'
+        || str_starts_with($path, '.github/workflows/')
+        || str_starts_with($path, 'scripts/')
+        || str_starts_with($path, 'bin/')
+        || str_starts_with($path, 'docker/')
+        || str_starts_with($path, 'containers/')
+        || str_starts_with($path, 'Dockerfile')
+        || $path === 'Makefile';
 }
 
 function containsComposerExecutableText(string $text): bool
@@ -1466,12 +1475,25 @@ function auditRoutes(string $repositoryRoot): array
                 continue;
             }
 
-            $recordCount = count($records);
-
             foreach ($segments as $chainIndex => $segment) {
                 $invocation = parseInvocation(commandTokens($segment));
 
                 if ($invocation === null) {
+                    if (isSupportedProductionRoute($path) && containsComposerExecutableText($segment)) {
+                        $records[] = [
+                            'path' => $path,
+                            'line' => $command['line'],
+                            'logical' => $command['logical'],
+                            'scalar' => $command['scalar'],
+                            'chain' => $chainIndex,
+                            'segment' => $segment,
+                            'executable' => 'unclassified-shell',
+                            'operation' => 'unknown',
+                            'classification' => 'unclassified',
+                            'rationale' => 'Composer-bearing shell segment could not be classified by the bounded grammar',
+                        ];
+                    }
+
                     continue;
                 }
 
@@ -1487,25 +1509,6 @@ function auditRoutes(string $repositoryRoot): array
                     'operation' => $invocation['operation'],
                     'classification' => $route['classification'],
                     'rationale' => $route['rationale'],
-                ];
-            }
-
-            if (
-                count($records) === $recordCount
-                && $isWorkflow
-                && containsComposerExecutableText($command['text'])
-            ) {
-                $records[] = [
-                    'path' => $path,
-                    'line' => $command['line'],
-                    'logical' => $command['logical'],
-                    'scalar' => $command['scalar'],
-                    'chain' => 0,
-                    'segment' => $command['text'],
-                    'executable' => 'unclassified-workflow',
-                    'operation' => 'unknown',
-                    'classification' => 'unclassified',
-                    'rationale' => 'Composer-bearing workflow command could not be classified by the bounded shell grammar',
                 ];
             }
         }
@@ -1638,6 +1641,25 @@ function assertParserRejects(callable $callback, string $expectedMessage): void
 $repositoryRoot = dirname(__DIR__, 2);
 $guard = $repositoryRoot.'/bin/composer-policy';
 $guardContents = file_get_contents($guard);
+$requestedGroup = null;
+
+foreach (array_slice($argv, 1) as $argument) {
+    if ($argument === '--route-audit') {
+        continue;
+    }
+
+    if (str_starts_with($argument, '--group=')) {
+        $requestedGroup = substr($argument, strlen('--group='));
+
+        continue;
+    }
+
+    fail("Unknown test argument {$argument}.");
+}
+
+if ($requestedGroup !== null && ! in_array($requestedGroup, ['effective-policy-command-contract', 'route-audit-fail-closed', 'process-io'], true)) {
+    fail("Unknown Composer policy test group {$requestedGroup}.");
+}
 
 if ($guardContents === false) {
     fail('Could not read bin/composer-policy.');
@@ -1982,6 +2004,18 @@ PHP;
         assertNoComposerRan($trustedMarker, $shadowMarker, "Manifest mutation {$scenario}");
     }
 
+    $racedManifestRoot = createTemporaryRepository($repositoryRoot);
+    $temporaryRoots[] = $racedManifestRoot;
+    $racedTrustedMarker = $racedManifestRoot.'/trusted.marker';
+    $racedShadowMarker = $racedManifestRoot.'/shadow.marker';
+    $racedEnvironment = assertionEnvironment($racedManifestRoot, $racedShadowMarker, $racedTrustedMarker);
+    $racedEnvironment['SYNTHETIC_IO_MODE'] = 'mutate-manifest-during-policy-probe';
+    writeSyntheticDistribution($racedManifestRoot);
+    $racedResult = runCommand([PHP_BINARY, $racedManifestRoot.'/bin/composer-policy', 'update', '--dry-run'], $racedEnvironment, $racedManifestRoot);
+    assertTrue($racedResult['status'] !== 0 && str_contains($racedResult['stderr'], 'Composer manifest policy rejected'), 'Manifest policy must be reasserted after probes immediately before resolver delegation.');
+    $racedInvocations = array_values(array_filter(explode("\n", (string) file_get_contents($racedTrustedMarker))));
+    assertTrue(count($racedInvocations) === 2, 'A manifest changed during probes must prevent the delegated resolver invocation.');
+
     $guarded = 'php bin/'.'composer-policy install';
     foreach ([
         ['composer'.' --no-interaction '.'install', 0, 'composer', 'install'],
@@ -2041,6 +2075,46 @@ PHP;
         } finally {
             removeDirectory($fixtureRoot);
         }
+    }
+
+    $literalMultiCommandRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        '.github/workflows/routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: |\n          php bin/composer-policy validate\n          composer install\n",
+    ]);
+
+    try {
+        $records = auditRoutes($literalMultiCommandRoot);
+        $directInstall = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'composer'
+            && $record['operation'] === 'install'
+            && $record['classification'] === 'unsupported'));
+        assertTrue(count($directInstall) === 1, 'Each literal workflow newline must preserve its own Composer command boundary.');
+    } finally {
+        removeDirectory($literalMultiCommandRoot);
+    }
+
+    $unknownShellRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'scripts/dependencies.sh' => "#!/bin/sh\ncomposer --bogus install\n",
+    ]);
+
+    try {
+        $records = auditRoutes($unknownShellRoot);
+        $unclassifiedShell = array_values(array_filter($records, static fn (array $record): bool => $record['path'] === 'scripts/dependencies.sh'
+            && $record['classification'] === 'unclassified'));
+        assertTrue(count($unclassifiedShell) === 1, 'Composer-bearing supported shell routes outside the command grammar must fail closed explicitly.');
+    } finally {
+        removeDirectory($unknownShellRoot);
+    }
+
+    $siblingFallbackRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
+        'README.md' => "```sh\ncomposer --bogus install\n```\n",
+        'scripts/dependencies.sh' => "#!/bin/sh\nphp bin/composer-policy validate; composer --bogus install\n",
+    ]);
+
+    try {
+        $records = auditRoutes($siblingFallbackRoot);
+        $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['classification'] === 'unclassified'));
+        assertTrue(count($unclassified) === 2, 'README and each Composer-bearing sibling shell segment must fail closed independently.');
+    } finally {
+        removeDirectory($siblingFallbackRoot);
     }
 
     foreach ([
@@ -2124,4 +2198,5 @@ PHP;
     }
 }
 
-fwrite(STDOUT, "Composer policy guard tests passed.\n");
+$scope = $requestedGroup === null ? 'full suite' : "group {$requestedGroup} with shared security prerequisites";
+fwrite(STDOUT, "Composer policy guard tests passed ({$scope}).\n");

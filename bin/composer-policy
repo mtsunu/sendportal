@@ -419,4 +419,8 @@ if ($policyProbe['status'] !== 0) {
     reject('Composer distribution policy capability unavailable.');
 }
 
+if (in_array($commandDecision['command'], ['install', 'update'], true) && ! hasExactManifestPolicy($repositoryRoot)) {
+    reject('Composer manifest policy rejected.');
+}
+
 exit(delegateComposer([PHP_BINARY, $composerPath, ...$arguments], $repositoryRoot, $isolatedEnvironment['environment']));
