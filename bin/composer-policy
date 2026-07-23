@@ -7,7 +7,7 @@ const COMPOSER_RELEASE = '2.10.2';
 const COMPOSER_PHAR_NAME = 'composer-2.10.2.phar';
 const COMPOSER_RECORD_NAME = 'composer-2.10.2.phar.sha256';
 const COMPOSER_RELEASE_URL = 'https://getcomposer.org/download/2.10.2/composer.phar';
-const COMPOSER_CHECKSUM_URL = 'https://getcomposer.org/download/2.10.2/composer.phar.sha256sum';
+const COMPOSER_CHECKSUM_VERIFICATION = 'separately downloaded official SHA-256 from https://getcomposer.org/download/2.10.2/composer.phar.sha256sum';
 
 function reject(string $message): never
 {
@@ -84,7 +84,7 @@ function verifiedComposerPath(): string
     $expectedLines = [
         'release: '.COMPOSER_RELEASE,
         'source: '.COMPOSER_RELEASE_URL,
-        'verification: '.COMPOSER_CHECKSUM_URL,
+        'verification: '.COMPOSER_CHECKSUM_VERIFICATION,
     ];
 
     foreach ($expectedLines as $index => $line) {

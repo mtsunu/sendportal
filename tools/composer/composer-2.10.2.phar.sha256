@@ -1,4 +1,4 @@
 release: 2.10.2
 source: https://getcomposer.org/download/2.10.2/composer.phar
-verification: https://getcomposer.org/download/2.10.2/composer.phar.sha256sum
+verification: separately downloaded official SHA-256 from https://getcomposer.org/download/2.10.2/composer.phar.sha256sum
 5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027 composer-2.10.2.phar
