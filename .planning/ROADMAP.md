@@ -30,9 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The published Composer metadata declares PHP 8.2, 8.3, and 8.4 as the supported runtime contract.
   3. Dependency resolution no longer fails because of the Roave/Laravel conflict, while Composer platform checks and a dependency-security safeguard remain enabled.
 
-**Plans**: 3/3 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
+
+- [x] 01-04-PLAN.md
 
 - [x] 01-03-PLAN.md
 
@@ -80,6 +82,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Constraint Resolution and Security Control | 3/3 | In Progress|  |
+| 1. Constraint Resolution and Security Control | 4/4 | In Progress|  |
 | 2. Reproducible Dependency Snapshot | 0/TBD | Not started | - |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/TBD | Not started | - |
