@@ -2409,7 +2409,8 @@ function auditRoutes(string $repositoryRoot): array
                 continue;
             }
 
-            $programBearing = routeAuditMarker($contents);
+            $programBearing = routeAuditMarker($contents)
+                || preg_match('~\bcomposer(?:\.phar)?\b|bin/composer-policy~i', $contents) === 1;
             $phpRecordStart = count($records);
 
             $phpLaunches = phpProcessLaunches($contents);
@@ -2472,10 +2473,10 @@ function auditRoutes(string $repositoryRoot): array
                 ];
             }
 
-            if ($programBearing && $phpLaunches !== [] && count($records) === $phpRecordStart) {
+            if ($programBearing && isSupportedProductionRoute($path) && count($records) === $phpRecordStart) {
                 $line = markerSourceLine($contents);
                 $sourceLine = explode("\n", $contents)[$line - 1] ?? $contents;
-                $records[] = shellRouteRecord($path, $line, $sourceLine, 'php-program', 0, $sourceLine, 'unclassified-php', 'unknown', 'unclassified', 'marker-bearing PHP program produced no bounded process-launch record');
+                $records[] = shellRouteRecord($path, $line, $sourceLine, 'php-program', 0, $contents, 'unclassified-php', 'unknown', 'unclassified', 'marker-bearing PHP program produced no bounded process-launch record');
             }
 
             continue;
