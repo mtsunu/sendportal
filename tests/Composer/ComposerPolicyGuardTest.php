@@ -11,6 +11,8 @@ declare(strict_types=1);
 const MAX_ROUTE_LOGICAL_LINE_LENGTH = 16384;
 const MAX_ROUTE_SEGMENTS = 64;
 const MAX_ROUTE_TOKENS = 256;
+const MAX_ROUTE_EVALUATOR_DEPTH = 4;
+const MAX_ROUTE_EVALUATOR_PAYLOADS = 32;
 
 require_once dirname(__DIR__, 2).'/tools/composer/ComposerPolicyCommandContract.php';
 
@@ -554,24 +556,35 @@ function commandChainSegments(string $logicalLine, bool $strict = true): array
 }
 
 /**
- * @return list<string>
+ * @return list<array{value: string, raw: string, fragments: list<array{quote: string, text: string, escaped: bool}>, dynamic: bool}>
  */
-function commandTokens(string $segment, bool $strict = true): array
+function commandTokenDetails(string $segment, bool $strict = true): array
 {
     $tokens = [];
     $token = '';
+    $raw = '';
+    $fragments = [];
+    $dynamic = false;
     $tokenStarted = false;
     $quote = null;
     $escaped = false;
     $length = strlen($segment);
 
-    $appendToken = static function () use (&$tokens, &$token, &$tokenStarted): void {
+    $appendToken = static function () use (&$tokens, &$token, &$raw, &$fragments, &$dynamic, &$tokenStarted): void {
         if (! $tokenStarted) {
             return;
         }
 
-        $tokens[] = $token;
+        $tokens[] = [
+            'value' => $token,
+            'raw' => $raw,
+            'fragments' => $fragments,
+            'dynamic' => $dynamic,
+        ];
         $token = '';
+        $raw = '';
+        $fragments = [];
+        $dynamic = false;
         $tokenStarted = false;
 
         if (count($tokens) > MAX_ROUTE_TOKENS) {
@@ -579,11 +592,25 @@ function commandTokens(string $segment, bool $strict = true): array
         }
     };
 
+    $appendFragment = static function (string $character, string $mode, bool $wasEscaped) use (&$fragments): void {
+        $lastIndex = array_key_last($fragments);
+
+        if ($lastIndex !== null && $fragments[$lastIndex]['quote'] === $mode && $fragments[$lastIndex]['escaped'] === $wasEscaped) {
+            $fragments[$lastIndex]['text'] .= $character;
+
+            return;
+        }
+
+        $fragments[] = ['quote' => $mode, 'text' => $character, 'escaped' => $wasEscaped];
+    };
+
     for ($index = 0; $index < $length; ++$index) {
         $character = $segment[$index];
 
         if ($escaped) {
             $token .= $character;
+            $raw .= $character;
+            $appendFragment($character, $quote ?? 'unquoted', true);
             $tokenStarted = true;
             $escaped = false;
 
@@ -591,6 +618,7 @@ function commandTokens(string $segment, bool $strict = true): array
         }
 
         if ($character === '\\' && $quote !== "'") {
+            $raw .= $character;
             $tokenStarted = true;
             $escaped = true;
 
@@ -599,6 +627,7 @@ function commandTokens(string $segment, bool $strict = true): array
 
         if ($character === "'" && $quote === "'") {
             $quote = null;
+            $raw .= $character;
             $tokenStarted = true;
 
             continue;
@@ -606,6 +635,7 @@ function commandTokens(string $segment, bool $strict = true): array
 
         if ($character === '"' && $quote === '"') {
             $quote = null;
+            $raw .= $character;
             $tokenStarted = true;
 
             continue;
@@ -613,6 +643,7 @@ function commandTokens(string $segment, bool $strict = true): array
 
         if ($quote === null && in_array($character, ["'", '"'], true)) {
             $quote = $character;
+            $raw .= $character;
             $tokenStarted = true;
 
             continue;
@@ -625,6 +656,9 @@ function commandTokens(string $segment, bool $strict = true): array
         }
 
         $token .= $character;
+        $raw .= $character;
+        $appendFragment($character, $quote === "'" ? 'single' : ($quote === '"' ? 'double' : 'unquoted'), false);
+        $dynamic = $dynamic || ($quote !== "'" && ($character === '$' || $character === '`'));
         $tokenStarted = true;
     }
 
@@ -639,6 +673,14 @@ function commandTokens(string $segment, bool $strict = true): array
     $appendToken();
 
     return $tokens;
+}
+
+/**
+ * @return list<string>
+ */
+function commandTokens(string $segment, bool $strict = true): array
+{
+    return array_column(commandTokenDetails($segment, $strict), 'value');
 }
 
 function isPotentialInvocationSegment(string $segment): bool
@@ -1079,6 +1121,16 @@ function parseInvocation(array $tokens): ?array
         $basename = strtolower(basename($executable));
     }
 
+    if (in_array($basename, ['bash', 'sh', 'zsh', 'eval'], true)) {
+        return [
+            'executable' => 'evaluator',
+            'operation' => $basename,
+            'contract_allowed' => false,
+            'evaluator' => $basename,
+            'arguments' => $tokens,
+        ];
+    }
+
     $executableClass = str_ends_with(str_replace('\\', '/', $executable), 'bin/composer-policy')
         ? 'guard'
         : (in_array($basename, ['composer', 'composer.phar'], true) ? $basename : null);
@@ -1155,7 +1207,8 @@ function isSupportedProductionRoute(string $path): bool
 function containsComposerExecutableText(string $text): bool
 {
     foreach (commandChainSegments($text, false) as $segment) {
-        $tokens = commandTokens($segment, false);
+        $details = commandTokenDetails($segment, false);
+        $tokens = array_column($details, 'value');
 
         while ($tokens !== [] && (
             preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $tokens[0]) === 1
@@ -1183,6 +1236,14 @@ function containsComposerExecutableText(string $text): bool
             || str_ends_with(str_replace('\\', '/', (string) ($tokens[0] ?? '')), 'bin/composer-policy')
         ) {
             return true;
+        }
+
+        if (in_array($executable, ['bash', 'sh', 'zsh', 'eval'], true)) {
+            foreach (array_slice($details, 1) as $detail) {
+                if (preg_match('~(?:^|[[:space:]])(?:composer|composer\\.phar|php[[:space:]]+bin/composer-policy)(?:[[:space:]]|$)~i', $detail['value']) === 1) {
+                    return true;
+                }
+            }
         }
     }
 
@@ -1324,6 +1385,130 @@ function phpProcessLaunches(string $contents): array
     }
 
     return $launches;
+}
+
+/**
+ * @param list<string> $trail
+ * @return array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}
+ */
+function shellRouteRecord(string $path, int $line, string $logical, string $scalar, int $chain, string $segment, string $executable, string $operation, string $classification, string $rationale, int $depth = 0, array $trail = [], string $payloadRaw = '', string $payloadDecoded = ''): array
+{
+    return [
+        'path' => $path,
+        'line' => $line,
+        'logical' => $logical,
+        'scalar' => $scalar,
+        'chain' => $chain,
+        'segment' => $segment,
+        'executable' => $executable,
+        'operation' => $operation,
+        'classification' => $classification,
+        'rationale' => $rationale,
+        'evaluator_depth' => $depth,
+        'evaluator_trail' => implode(' > ', $trail),
+        'payload_raw' => $payloadRaw,
+        'payload_decoded' => $payloadDecoded,
+    ];
+}
+
+/**
+ * @param array{visited: int} $state
+ * @param list<string> $trail
+ * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
+ */
+function classifyShellRouteSegment(string $path, int $line, string $logical, string $scalar, int $chain, string $segment, array &$state, int $depth = 0, array $trail = []): array
+{
+    if (str_starts_with(trim($segment), '#!')) {
+        return [];
+    }
+
+    try {
+        $details = commandTokenDetails($segment);
+        $invocation = parseInvocation(array_column($details, 'value'));
+    } catch (RuntimeException $exception) {
+        if (preg_match('~(?:^|[[:space:]])(?:bash|sh|zsh|eval)(?:[[:space:]]|$)~', $segment) === 1 || containsComposerExecutableText($segment)) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-shell', 'unknown', 'unclassified', $exception->getMessage(), $depth, $trail)];
+        }
+
+        return [];
+    }
+
+    if ($invocation === null) {
+        if (isSupportedProductionRoute($path) && containsComposerExecutableText($segment)) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-shell', 'unknown', 'unclassified', 'Composer-bearing shell segment could not be classified by the bounded grammar', $depth, $trail)];
+        }
+
+        return [];
+    }
+
+    if ($invocation['executable'] !== 'evaluator') {
+        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale'], $depth, $trail)];
+    }
+
+    $evaluator = $invocation['evaluator'];
+    $arguments = $invocation['arguments'];
+    $payloadIndex = $evaluator === 'eval' ? 0 : 1;
+    $expectedArguments = $evaluator === 'eval' ? 1 : 2;
+    $trailEntry = $evaluator === 'eval' ? 'eval' : $evaluator.' -c';
+    $nextTrail = [...$trail, $trailEntry];
+
+    if (count($arguments) !== $expectedArguments || ($evaluator !== 'eval' && ($arguments[0] ?? null) !== '-c')) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} is outside the bounded evaluator grammar", $depth, $nextTrail)];
+    }
+
+    $evaluatorDetailIndex = null;
+
+    foreach ($details as $index => $detail) {
+        if ($detail['value'] === $evaluator) {
+            $evaluatorDetailIndex = $index;
+
+            break;
+        }
+    }
+
+    $payload = $evaluatorDetailIndex === null ? null : ($details[$evaluatorDetailIndex + 1 + $payloadIndex] ?? null);
+
+    if ($payload === null) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload provenance is unavailable", $depth, $nextTrail)];
+    }
+
+    if ($payload['dynamic']) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload is dynamic", $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    if (strlen($payload['value']) > MAX_ROUTE_LOGICAL_LINE_LENGTH) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload length exceeds the configured bound", $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    if ($depth >= MAX_ROUTE_EVALUATOR_DEPTH) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', 'Route audit evaluator depth exceeds the configured bound', $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    ++$state['visited'];
+
+    if ($state['visited'] > MAX_ROUTE_EVALUATOR_PAYLOADS) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', 'Route audit evaluator payload count exceeds the configured bound', $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    try {
+        $nestedSegments = commandChainSegments($payload['value']);
+    } catch (RuntimeException $exception) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', $exception->getMessage(), $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    if ($nestedSegments === []) {
+        return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-evaluator', $evaluator, 'unclassified', "{$trailEntry} payload has no bounded command segment", $depth, $nextTrail, $payload['raw'], $payload['value'])];
+    }
+
+    $records = [];
+
+    foreach ($nestedSegments as $nestedSegment) {
+        $records = [...$records, ...classifyShellRouteSegment($path, $line, $logical, $scalar, $chain, $nestedSegment, $state, $depth + 1, $nextTrail)];
+    }
+
+    return $records;
 }
 
 /**
@@ -1475,41 +1660,18 @@ function auditRoutes(string $repositoryRoot): array
                 continue;
             }
 
+            $evaluatorState = ['visited' => 0];
+
             foreach ($segments as $chainIndex => $segment) {
-                $invocation = parseInvocation(commandTokens($segment));
-
-                if ($invocation === null) {
-                    if (isSupportedProductionRoute($path) && containsComposerExecutableText($segment)) {
-                        $records[] = [
-                            'path' => $path,
-                            'line' => $command['line'],
-                            'logical' => $command['logical'],
-                            'scalar' => $command['scalar'],
-                            'chain' => $chainIndex,
-                            'segment' => $segment,
-                            'executable' => 'unclassified-shell',
-                            'operation' => 'unknown',
-                            'classification' => 'unclassified',
-                            'rationale' => 'Composer-bearing shell segment could not be classified by the bounded grammar',
-                        ];
-                    }
-
-                    continue;
-                }
-
-                $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
-                $records[] = [
-                    'path' => $path,
-                    'line' => $command['line'],
-                    'logical' => $command['logical'],
-                    'scalar' => $command['scalar'],
-                    'chain' => $chainIndex,
-                    'segment' => $segment,
-                    'executable' => $invocation['executable'],
-                    'operation' => $invocation['operation'],
-                    'classification' => $route['classification'],
-                    'rationale' => $route['rationale'],
-                ];
+                $records = [...$records, ...classifyShellRouteSegment(
+                    $path,
+                    $command['line'],
+                    $command['logical'],
+                    $command['scalar'],
+                    $chainIndex,
+                    $segment,
+                    $evaluatorState,
+                )];
             }
         }
     }
@@ -1553,7 +1715,7 @@ function printRouteAuditRecords(array $records): void
 {
     foreach ($records as $record) {
         fwrite(STDOUT, sprintf(
-            "ROUTE path=%s line=%d scalar=%s chain=%d segment=%s executable=%s operation=%s classification=%s logical=%s rationale=%s\n",
+            "ROUTE path=%s line=%d scalar=%s chain=%d segment=%s executable=%s operation=%s classification=%s evaluator_depth=%d evaluator_trail=%s payload_raw=%s payload_decoded=%s logical=%s rationale=%s\n",
             $record['path'],
             $record['line'],
             $record['scalar'] ?? 'legacy',
@@ -1562,6 +1724,10 @@ function printRouteAuditRecords(array $records): void
             $record['executable'],
             $record['operation'],
             $record['classification'],
+            $record['evaluator_depth'] ?? 0,
+            $record['evaluator_trail'] ?? '',
+            $record['payload_raw'] ?? '',
+            $record['payload_decoded'] ?? '',
             $record['logical'],
             $record['rationale'],
         ));
