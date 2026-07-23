@@ -24,7 +24,7 @@ function runComposer(array $command, string $repositoryRoot): array
 {
     $process = proc_open(
         $command,
-        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        [1 => ['pipe', 'w'], 2 => ['redirect', 1]],
         $pipes,
         $repositoryRoot,
     );
@@ -33,9 +33,8 @@ function runComposer(array $command, string $repositoryRoot): array
         reject('Composer distribution unavailable.');
     }
 
-    $output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+    $output = stream_get_contents($pipes[1]);
     fclose($pipes[1]);
-    fclose($pipes[2]);
 
     return [proc_close($process), $output];
 }
