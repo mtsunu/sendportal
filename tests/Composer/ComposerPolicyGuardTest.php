@@ -183,6 +183,268 @@ function assertGuardStructure(string $guard): void
     assertTrue(! str_contains($guard, 'resolveComposer'), 'Guard must not retain the PATH Composer resolver.');
 }
 
+/**
+ * @return list<string>
+ */
+function trackedFiles(string $repositoryRoot): array
+{
+    [$status, $output] = runCommand(['git', 'ls-files', '-z'], getenv(), $repositoryRoot);
+    assertTrue($status === 0, 'Could not enumerate tracked files for the route audit.');
+
+    return array_values(array_filter(explode("\0", $output), static fn (string $path): bool => $path !== ''));
+}
+
+/**
+ * @return list<array{line: int, text: string}>
+ */
+function normalizedLogicalLines(string $contents): array
+{
+    $logicalLines = [];
+    $buffer = '';
+    $startLine = 1;
+    $lineNumber = 1;
+
+    foreach (preg_split('/\R/', $contents) as $line) {
+        $trimmed = rtrim($line);
+        $continues = str_ends_with($trimmed, '\\');
+        $fragment = $continues ? substr($trimmed, 0, -1) : $line;
+        $buffer .= ($buffer === '' ? '' : ' ').$fragment;
+
+        if (! $continues) {
+            $logicalLines[] = [
+                'line' => $startLine,
+                'text' => trim((string) preg_replace('/\s+/', ' ', $buffer)),
+            ];
+            $buffer = '';
+            $startLine = $lineNumber + 1;
+        }
+
+        ++$lineNumber;
+    }
+
+    if ($buffer !== '') {
+        $logicalLines[] = ['line' => $startLine, 'text' => trim((string) preg_replace('/\s+/', ' ', $buffer))];
+    }
+
+    return $logicalLines;
+}
+
+/**
+ * @return list<string>
+ */
+function commandChainSegments(string $logicalLine): array
+{
+    return array_values(array_filter(
+        array_map('trim', preg_split('/(?:&&|\|\||;|\|)/', $logicalLine)),
+        static fn (string $segment): bool => $segment !== '',
+    ));
+}
+
+/**
+ * @return list<string>
+ */
+function commandTokens(string $segment): array
+{
+    return array_values(array_filter(preg_split('/\s+/', trim($segment)), static fn (string $token): bool => $token !== ''));
+}
+
+/**
+ * @return array{executable: string, operation: string}|null
+ */
+function parseInvocation(string $segment): ?array
+{
+    $tokens = commandTokens($segment);
+
+    while ($tokens !== []) {
+        $token = $tokens[0];
+
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $token) === 1 || in_array($token, ['run:', 'command:'], true)) {
+            array_shift($tokens);
+
+            continue;
+        }
+
+        if ($token === 'env') {
+            array_shift($tokens);
+
+            continue;
+        }
+
+        if ($token === 'sudo') {
+            array_shift($tokens);
+
+            while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+                array_shift($tokens);
+            }
+
+            continue;
+        }
+
+        break;
+    }
+
+    if ($tokens === []) {
+        return null;
+    }
+
+    $executable = array_shift($tokens);
+    $basename = strtolower(basename($executable));
+
+    if (preg_match('/^php(?:[0-9.]+)?$/', $basename) === 1) {
+        while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+            array_shift($tokens);
+        }
+
+        if ($tokens === []) {
+            return null;
+        }
+
+        $executable = array_shift($tokens);
+        $basename = strtolower(basename($executable));
+    }
+
+    $executableClass = str_ends_with(str_replace('\\', '/', $executable), 'bin/composer-policy')
+        ? 'guard'
+        : (in_array($basename, ['composer', 'composer.phar'], true) ? $basename : null);
+
+    if ($executableClass === null) {
+        return null;
+    }
+
+    while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+        array_shift($tokens);
+    }
+
+    $operation = strtolower((string) ($tokens[0] ?? ''));
+
+    if (! in_array($operation, ['install', 'update', 'require', 'remove', 'create-project'], true)) {
+        return null;
+    }
+
+    return ['executable' => $executableClass, 'operation' => $operation];
+}
+
+/**
+ * @return array{classification: string, rationale: string}
+ */
+function classifyRoute(string $path, string $executable): array
+{
+    if (str_starts_with($path, '.planning/') || str_starts_with($path, 'tests/')) {
+        return ['classification' => 'non-production', 'rationale' => 'planning, history, research, and test coverage are not production dependency routes'];
+    }
+
+    $supported = $path === 'README.md'
+        || str_starts_with($path, '.github/workflows/')
+        || str_starts_with($path, 'scripts/')
+        || str_starts_with($path, 'bin/')
+        || str_starts_with($path, 'docker/')
+        || str_starts_with($path, 'containers/')
+        || str_starts_with($path, 'Dockerfile')
+        || $path === 'Makefile';
+
+    if (! $supported) {
+        return ['classification' => 'unclassified', 'rationale' => 'Composer mutation command has no approved production route classification'];
+    }
+
+    if ($executable !== 'guard') {
+        return ['classification' => 'unsupported', 'rationale' => 'supported dependency route invokes Composer directly instead of the repository guard'];
+    }
+
+    return ['classification' => 'supported', 'rationale' => 'this command-chain segment invokes the repository guard'];
+}
+
+/**
+ * @return list<array{path: string, line: int, logical: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string}>
+ */
+function auditRoutes(string $repositoryRoot): array
+{
+    $guard = file_get_contents($repositoryRoot.'/bin/composer-policy');
+    assertTrue($guard !== false, 'Could not read bin/composer-policy for the route audit.');
+    assertGuardStructure($guard);
+
+    $records = [];
+
+    foreach (trackedFiles($repositoryRoot) as $path) {
+        $contents = file_get_contents($repositoryRoot.'/'.$path);
+        assertTrue($contents !== false, "Could not inspect tracked file {$path} for the route audit.");
+
+        foreach (normalizedLogicalLines($contents) as $logicalLine) {
+            foreach (commandChainSegments($logicalLine['text']) as $chainIndex => $segment) {
+                $invocation = parseInvocation($segment);
+
+                if ($invocation === null) {
+                    continue;
+                }
+
+                $route = classifyRoute($path, $invocation['executable']);
+                $records[] = [
+                    'path' => $path,
+                    'line' => $logicalLine['line'],
+                    'logical' => $logicalLine['text'],
+                    'chain' => $chainIndex,
+                    'segment' => $segment,
+                    'executable' => $invocation['executable'],
+                    'operation' => $invocation['operation'],
+                    'classification' => $route['classification'],
+                    'rationale' => $route['rationale'],
+                ];
+            }
+        }
+    }
+
+    usort($records, static fn (array $left, array $right): int => [$left['path'], $left['line'], $left['chain'], $left['executable'], $left['operation']] <=> [$right['path'], $right['line'], $right['chain'], $right['executable'], $right['operation']]);
+
+    return $records;
+}
+
+/**
+ * @param list<array{path: string, line: int, logical: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string}> $records
+ * @return list<string>
+ */
+function routeAuditFailures(array $records, bool $requireGuardedEvidence = false): array
+{
+    $failures = [];
+
+    foreach ($records as $record) {
+        if (in_array($record['classification'], ['unclassified', 'unsupported'], true)) {
+            $failures[] = "{$record['path']}:{$record['line']}:{$record['chain']} {$record['rationale']}";
+        }
+    }
+
+    if ($requireGuardedEvidence) {
+        foreach (['README.md', '.github/workflows/'] as $requiredPath) {
+            $found = (bool) array_filter($records, static fn (array $record): bool => $record['classification'] === 'supported' && ($record['path'] === $requiredPath || str_starts_with($record['path'], $requiredPath)));
+
+            if (! $found) {
+                $failures[] = "No guarded Composer mutation record was found in {$requiredPath}.";
+            }
+        }
+    }
+
+    return $failures;
+}
+
+/**
+ * @param list<array{path: string, line: int, logical: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string}> $records
+ */
+function printRouteAuditRecords(array $records): void
+{
+    foreach ($records as $record) {
+        fwrite(STDOUT, sprintf(
+            "ROUTE path=%s line=%d chain=%d segment=%s executable=%s operation=%s classification=%s logical=%s rationale=%s\n",
+            $record['path'],
+            $record['line'],
+            $record['chain'],
+            $record['segment'],
+            $record['executable'],
+            $record['operation'],
+            $record['classification'],
+            $record['logical'],
+            $record['rationale'],
+        ));
+    }
+}
+
 function initializeFixtureRepository(string $sourceRoot, string $contents): string
 {
     $fixtureRoot = sys_get_temp_dir().'/sendportal-composer-route-'.bin2hex(random_bytes(8));
@@ -216,6 +478,16 @@ $guardContents = file_get_contents($guard);
 
 if ($guardContents === false) {
     fail('Could not read bin/composer-policy.');
+}
+
+if (($argv[1] ?? null) === '--route-audit') {
+    $records = auditRoutes($repositoryRoot);
+    printRouteAuditRecords($records);
+    $failures = routeAuditFailures($records, true);
+    assertTrue($failures === [], "Composer route audit failed: ".implode(' | ', $failures));
+    fwrite(STDOUT, 'Composer route audit passed with '.count($records)." classified records.\n");
+
+    exit(0);
 }
 
 assertGuardStructure($guardContents);
@@ -305,6 +577,9 @@ try {
     ] as [$command, $chainIndex, $form]) {
         assertFixtureRouteFails($repositoryRoot, $command, $chainIndex, $form);
     }
+
+    $productionRecords = auditRoutes($repositoryRoot);
+    assertTrue(routeAuditFailures($productionRecords, true) === [], 'Production route audit must pass using only tracked records.');
 } finally {
     foreach ($temporaryRoots as $temporaryRoot) {
         removeDirectory($temporaryRoot);
