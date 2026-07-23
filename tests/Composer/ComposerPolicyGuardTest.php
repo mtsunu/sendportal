@@ -15,6 +15,7 @@ const MAX_ROUTE_EVALUATOR_DEPTH = 4;
 const MAX_ROUTE_EVALUATOR_PAYLOADS = 32;
 const MAX_ROUTE_COMPOUND_DEPTH = 4;
 const MAX_ROUTE_COMPOUND_BODIES = 32;
+const MAX_ROUTE_INLINE_PHP_LAUNCHES = 32;
 
 require_once dirname(__DIR__, 2).'/tools/composer/ComposerPolicyCommandContract.php';
 
@@ -1400,20 +1401,33 @@ function decodePhpStringLiteral(string $literal): ?string
         : stripcslashes($contents);
 }
 
-/**
- * @return list<string>|null
- */
-function literalPhpCommandTokens(string $expression): ?array
+function literalPhpCommandString(string $expression): ?string
 {
     $tokens = token_get_all('<?php '.$expression);
     $meaningful = array_values(array_filter($tokens, static fn (array|string $token): bool => ! is_array($token)
         || ! in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)));
 
-    if (count($meaningful) === 1 && is_array($meaningful[0]) && $meaningful[0][0] === T_CONSTANT_ENCAPSED_STRING) {
-        $command = decodePhpStringLiteral($meaningful[0][1]);
-
-        return is_string($command) ? commandTokens($command) : null;
+    if (count($meaningful) !== 1 || ! is_array($meaningful[0]) || $meaningful[0][0] !== T_CONSTANT_ENCAPSED_STRING) {
+        return null;
     }
+
+    return decodePhpStringLiteral($meaningful[0][1]);
+}
+
+/**
+ * @return list<string>|null
+ */
+function literalPhpCommandTokens(string $expression): ?array
+{
+    $literalCommand = literalPhpCommandString($expression);
+
+    if (is_string($literalCommand)) {
+        return commandTokens($literalCommand);
+    }
+
+    $tokens = token_get_all('<?php '.$expression);
+    $meaningful = array_values(array_filter($tokens, static fn (array|string $token): bool => ! is_array($token)
+        || ! in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)));
 
     $isArray = str_starts_with(trim($expression), '[') || preg_match('/^array\s*\(/i', trim($expression)) === 1;
 
@@ -1457,7 +1471,7 @@ function literalPhpCommandTokens(string $expression): ?array
 }
 
 /**
- * @return list<array{line: int, expression: string, tokens: list<string>|null, composer_bearing: bool}>
+ * @return list<array{line: int, expression: string, command: string|null, tokens: list<string>|null, composer_bearing: bool}>
  */
 function phpProcessLaunches(string $contents): array
 {
@@ -1512,6 +1526,7 @@ function phpProcessLaunches(string $contents): array
         $launches[] = [
             'line' => $line,
             'expression' => trim($expression),
+            'command' => literalPhpCommandString(trim($expression)),
             'tokens' => literalPhpCommandTokens(trim($expression)),
             'composer_bearing' => containsComposerExecutableText($expression)
                 || preg_match('/[\'"]composer(?:\.phar)?\s/i', $expression) === 1
@@ -1547,6 +1562,115 @@ function shellRouteRecord(string $path, int $line, string $logical, string $scal
 }
 
 /**
+ * @param list<array{value: string, raw: string, fragments: list<array{quote: string, text: string, escaped: bool}>, dynamic: bool}> $details
+ * @return array{program: string, raw: string, dynamic: bool, invalid: bool}|null
+ */
+function inlinePhpProgram(array $details): ?array
+{
+    $values = array_column($details, 'value');
+
+    if (preg_match('/^php(?:[0-9.]+)?$/', strtolower(basename((string) ($values[0] ?? '')))) !== 1) {
+        return null;
+    }
+
+    if (! in_array($values[1] ?? null, ['-r', '--run'], true)) {
+        return null;
+    }
+
+    if (count($details) !== 3) {
+        return ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true];
+    }
+
+    return [
+        'program' => $details[2]['value'],
+        'raw' => $details[2]['raw'],
+        'dynamic' => $details[2]['dynamic'],
+        'invalid' => false,
+    ];
+}
+
+/**
+ * @param array{visited: int, compounds: int} $state
+ * @param list<string> $trail
+ * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
+ */
+function classifyInlinePhpRouteSegment(string $path, int $line, string $logical, string $scalar, int $chain, string $segment, array $program, array &$state, int $depth, array $trail): array
+{
+    $nextTrail = [...$trail, 'php -r'];
+    $programBearing = containsComposerOrEvaluatorText($program['program']) || containsComposerOrEvaluatorText($program['raw']);
+
+    if ($program['invalid'] || $program['dynamic']) {
+        return $programBearing
+            ? [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'php -r program must be one literal argument', $depth, $nextTrail, $program['raw'], $program['program'])]
+            : [];
+    }
+
+    if (strlen($program['program']) > MAX_ROUTE_LOGICAL_LINE_LENGTH) {
+        return $programBearing
+            ? [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'php -r program length exceeds the configured bound', $depth, $nextTrail, $program['raw'], $program['program'])]
+            : [];
+    }
+
+    $contents = str_starts_with(ltrim($program['program']), '<?php') ? $program['program'] : '<?php '.$program['program'];
+    $launches = phpProcessLaunches($contents);
+
+    if (count($launches) > MAX_ROUTE_INLINE_PHP_LAUNCHES) {
+        return $programBearing
+            ? [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'php -r literal process-launch count exceeds the configured bound', $depth, $nextTrail, $program['raw'], $program['program'])]
+            : [];
+    }
+
+    if ($launches === []) {
+        return $programBearing
+            ? [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'Composer-bearing php -r program has no bounded process launch', $depth, $nextTrail, $program['raw'], $program['program'])]
+            : [];
+    }
+
+    $records = [];
+
+    foreach ($launches as $launch) {
+        if ($launch['tokens'] === null) {
+            if ($launch['composer_bearing']) {
+                $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'Composer-bearing php -r process launch is dynamic or outside the bounded literal grammar', $depth, $nextTrail, $program['raw'], $program['program']);
+            }
+
+            continue;
+        }
+
+        if ($launch['command'] !== null) {
+            try {
+                $nestedSegments = commandChainSegments($launch['command']);
+            } catch (RuntimeException $exception) {
+                $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', $exception->getMessage(), $depth, $nextTrail, $program['raw'], $program['program']);
+
+                continue;
+            }
+
+            foreach ($nestedSegments as $nestedSegment) {
+                $records = [...$records, ...classifyShellRouteSegment($path, $line, $logical, $scalar, $chain, $nestedSegment, $state, $depth + 1, $nextTrail)];
+            }
+
+            continue;
+        }
+
+        $invocation = parseInvocation($launch['tokens']);
+
+        if ($invocation === null) {
+            if ($launch['composer_bearing']) {
+                $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'Composer-bearing php -r process launch could not be classified', $depth, $nextTrail, $program['raw'], $program['program']);
+            }
+
+            continue;
+        }
+
+        $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
+        $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale'], $depth, $nextTrail, $program['raw'], $program['program']);
+    }
+
+    return $records;
+}
+
+/**
  * @param array{visited: int, compounds: int} $state
  * @param list<string> $trail
  * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
@@ -1555,6 +1679,16 @@ function classifyShellRouteSegment(string $path, int $line, string $logical, str
 {
     if (str_starts_with(trim($segment), '#!')) {
         return [];
+    }
+
+    try {
+        $inlineProgram = inlinePhpProgram(commandTokenDetails($segment));
+    } catch (RuntimeException $exception) {
+        $inlineProgram = null;
+    }
+
+    if ($inlineProgram !== null) {
+        return classifyInlinePhpRouteSegment($path, $line, $logical, $scalar, $chain, $segment, $inlineProgram, $state, $depth, $trail);
     }
 
     $compound = compoundShellBody($segment);
@@ -1825,6 +1959,30 @@ function auditRoutes(string $repositoryRoot): array
             try {
                 $segments = commandChainSegments($command['text'], true);
             } catch (RuntimeException $exception) {
+                try {
+                    $inlineProgram = inlinePhpProgram(commandTokenDetails($command['text']));
+                } catch (RuntimeException) {
+                    $inlineProgram = null;
+                }
+
+                if ($inlineProgram !== null) {
+                    $inlineState = ['visited' => 0, 'compounds' => 0];
+                    $records = [...$records, ...classifyInlinePhpRouteSegment(
+                        $path,
+                        $command['line'],
+                        $command['logical'],
+                        $command['scalar'],
+                        0,
+                        $command['text'],
+                        $inlineProgram,
+                        $inlineState,
+                        0,
+                        [],
+                    )];
+
+                    continue;
+                }
+
                 if (containsComposerExecutableText($command['text'])) {
                     $records[] = [
                         'path' => $path,
@@ -2511,7 +2669,7 @@ PHP;
 
     $inlinePhpDirect = 'system("'.$compoundDirect.'");';
     $inlinePhpGuarded = 'exec("'.$compoundGuarded.'");';
-    $inlinePhpEvaluator = 'system("bash -c \\\''.$compoundDirect.'\\\'");';
+    $inlinePhpEvaluator = 'system("bash -c \\"'.$compoundDirect.'\\"");';
 
     foreach ([
         'inline PHP direct process launch' => [$inlinePhpDirect, 'composer', 'install', 'unsupported'],
