@@ -31,7 +31,7 @@ function assertTrue(bool $condition, string $message): void
 /**
  * @param list<string> $command
  * @param array<string, string> $environment
- * @return array{int, string}
+ * @return array{status: int, stdout: string, stderr: string}
  */
 function runCommand(array $command, array $environment, string $workingDirectory): array
 {
@@ -47,11 +47,107 @@ function runCommand(array $command, array $environment, string $workingDirectory
         fail('Could not start the Composer policy guard.');
     }
 
-    $output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
 
-    return [proc_close($process), $output];
+    return ['status' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
+}
+
+/**
+ * @param list<string> $command
+ * @param array<string, string> $environment
+ * @return array{status: int, stdout: string, stderr: string, observed_before_exit: bool}
+ */
+function runStreamingHandshake(array $command, array $environment, string $workingDirectory, string $releaseFile): array
+{
+    $process = proc_open(
+        $command,
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        $workingDirectory,
+        $environment,
+    );
+
+    if (! is_resource($process)) {
+        fail('Could not start the streaming Composer policy guard.');
+    }
+
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+    $stdout = '';
+    $stderr = '';
+    $observedBeforeExit = false;
+    $deadline = microtime(true) + 5.0;
+
+    while (microtime(true) < $deadline) {
+        $read = [];
+
+        foreach ([1, 2] as $descriptor) {
+            if (is_resource($pipes[$descriptor]) && ! feof($pipes[$descriptor])) {
+                $read[] = $pipes[$descriptor];
+            }
+        }
+
+        if ($read !== []) {
+            $write = null;
+            $except = null;
+            @stream_select($read, $write, $except, 0, 100000);
+
+            foreach ($read as $stream) {
+                $chunk = stream_get_contents($stream);
+
+                if ($stream === $pipes[1]) {
+                    $stdout .= $chunk;
+                } else {
+                    $stderr .= $chunk;
+                }
+            }
+        }
+
+        $status = proc_get_status($process);
+
+        if (! $observedBeforeExit && str_contains($stdout, 'delegated-stdout-before-exit')) {
+            $observedBeforeExit = $status['running'];
+            writeFile($releaseFile, "release\n");
+        }
+
+        if (! $status['running'] && feof($pipes[1]) && feof($pipes[2])) {
+            break;
+        }
+    }
+
+    if (! file_exists($releaseFile)) {
+        writeFile($releaseFile, "release-after-timeout\n");
+    }
+
+    foreach ([1, 2] as $descriptor) {
+        $remaining = stream_get_contents($pipes[$descriptor]);
+
+        if ($descriptor === 1) {
+            $stdout .= $remaining;
+        } else {
+            $stderr .= $remaining;
+        }
+
+        fclose($pipes[$descriptor]);
+    }
+
+    $status = proc_get_status($process);
+
+    if ($status['running']) {
+        proc_terminate($process);
+    }
+
+    $exitStatus = proc_close($process);
+
+    return [
+        'status' => $exitStatus,
+        'stdout' => $stdout,
+        'stderr' => $stderr,
+        'observed_before_exit' => $observedBeforeExit,
+    ];
 }
 
 function writeFile(string $path, string $contents): void
@@ -107,7 +203,36 @@ if (in_array('--version', \$argv, true)) {
 }
 
 if ((\$argv[1] ?? null) === 'policy' && in_array('--help', \$argv, true)) {
+    if (getenv('SYNTHETIC_IO_MODE') === 'preflight-overflow') {
+        fwrite(STDOUT, str_repeat('P', 262145));
+        fwrite(STDERR, str_repeat('E', 262145));
+    }
+
     exit(0);
+}
+
+if (getenv('SYNTHETIC_IO_MODE') === 'streaming') {
+    fwrite(STDOUT, "delegated-stdout-before-exit\\n");
+    fflush(STDOUT);
+    \$releaseFile = (string) getenv('SYNTHETIC_RELEASE_FILE');
+    \$deadline = microtime(true) + 10.0;
+
+    while (! is_file(\$releaseFile) && microtime(true) < \$deadline) {
+        usleep(10000);
+    }
+
+    fwrite(STDERR, "delegated-stderr-after-release\\n");
+    fflush(STDERR);
+    exit(37);
+}
+
+if (getenv('SYNTHETIC_IO_MODE') === 'large-output') {
+    for (\$index = 0; \$index < 128; ++\$index) {
+        fwrite(STDOUT, str_repeat('O', 8192));
+        fwrite(STDERR, str_repeat('E', 8192));
+    }
+
+    exit(37);
 }
 PHP);
 
@@ -222,10 +347,10 @@ function assertGuardStructure(string $guard): void
  */
 function trackedFiles(string $repositoryRoot): array
 {
-    [$status, $output] = runCommand(['git', 'ls-files', '-z'], getenv(), $repositoryRoot);
-    assertTrue($status === 0, 'Could not enumerate tracked files for the route audit.');
+    $result = runCommand(['git', 'ls-files', '-z'], getenv(), $repositoryRoot);
+    assertTrue($result['status'] === 0, 'Could not enumerate tracked files for the route audit.');
 
-    return array_values(array_filter(explode("\0", $output), static fn (string $path): bool => $path !== ''));
+    return array_values(array_filter(explode("\0", $result['stdout']), static fn (string $path): bool => $path !== ''));
 }
 
 /**
@@ -1402,10 +1527,10 @@ function initializeFixtureRepositoryFiles(string $sourceRoot, array $files): str
         writeFile($fixtureRoot.'/'.$path, $contents);
     }
 
-    [$status, $output] = runCommand(['git', 'init', '--quiet'], getenv(), $fixtureRoot);
-    assertTrue($status === 0, "Could not initialize the route-audit fixture repository: {$output}");
-    [$status, $output] = runCommand(['git', 'add', 'bin/composer-policy', 'tools/composer/ComposerPolicyCommandContract.php', ...array_keys($files)], getenv(), $fixtureRoot);
-    assertTrue($status === 0, "Could not stage the route-audit fixture repository: {$output}");
+    $result = runCommand(['git', 'init', '--quiet'], getenv(), $fixtureRoot);
+    assertTrue($result['status'] === 0, "Could not initialize the route-audit fixture repository: {$result['stderr']}");
+    $result = runCommand(['git', 'add', 'bin/composer-policy', 'tools/composer/ComposerPolicyCommandContract.php', ...array_keys($files)], getenv(), $fixtureRoot);
+    assertTrue($result['status'] === 0, "Could not stage the route-audit fixture repository: {$result['stderr']}");
 
     return $fixtureRoot;
 }
@@ -1480,8 +1605,8 @@ try {
     $missingTrustedMarker = $missingRoot.'/trusted.marker';
     $missingShadowMarker = $missingRoot.'/shadow.marker';
     $missingEnvironment = assertionEnvironment($missingRoot, $missingShadowMarker, $missingTrustedMarker);
-    [$status, $output] = runCommand([PHP_BINARY, $missingRoot.'/bin/composer-policy', 'install'], $missingEnvironment, $missingRoot);
-    assertTrue($status !== 0 && str_contains($output, 'Composer distribution unavailable'), 'A missing repository distribution must fail closed.');
+    $result = runCommand([PHP_BINARY, $missingRoot.'/bin/composer-policy', 'install'], $missingEnvironment, $missingRoot);
+    assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer distribution unavailable'), 'A missing repository distribution must fail closed.');
     assertNoComposerRan($missingTrustedMarker, $missingShadowMarker, 'Missing distribution');
 
     $successRoot = createTemporaryRepository($repositoryRoot);
@@ -1492,8 +1617,8 @@ try {
     $successCallerRoot = createTemporaryDirectory('sendportal-composer-caller');
     $temporaryRoots[] = $successCallerRoot;
     writeSyntheticDistribution($successRoot);
-    [$status, $output] = runCommand([PHP_BINARY, $successRoot.'/bin/composer-policy', 'update', '--dry-run', '--prefer-dist', '-vvv'], $successEnvironment, $successCallerRoot);
-    assertTrue($status === 0, "A matching repository distribution must be delegated to: {$output}");
+    $result = runCommand([PHP_BINARY, $successRoot.'/bin/composer-policy', 'update', '--dry-run', '--prefer-dist', '-vvv'], $successEnvironment, $successCallerRoot);
+    assertTrue($result['status'] === 0, "A matching repository distribution must be delegated to: {$result['stderr']}");
     assertTrue(! file_exists($successShadowMarker), 'A compliant-looking PATH shadow must never execute.');
     $invocations = array_filter(explode("\n", (string) file_get_contents($successTrustedMarker)));
     assertTrue(count($invocations) === 3, 'The trusted distribution must receive version, policy, and delegated calls only.');
@@ -1504,6 +1629,71 @@ try {
     $delegation = json_decode((string) end($invocations), true, 512, JSON_THROW_ON_ERROR);
     assertTrue($delegation['php_binary'] === PHP_BINARY, 'The trusted distribution must be invoked through PHP_BINARY.');
     assertTrue($delegation['arguments'] === ['update', '--dry-run', '--prefer-dist', '-vvv'], 'Delegation must preserve requested Composer arguments.');
+
+    $streamingRoot = createTemporaryRepository($repositoryRoot);
+    $temporaryRoots[] = $streamingRoot;
+    $streamingTrustedMarker = $streamingRoot.'/trusted.marker';
+    $streamingShadowMarker = $streamingRoot.'/shadow.marker';
+    $streamingEnvironment = assertionEnvironment($streamingRoot, $streamingShadowMarker, $streamingTrustedMarker);
+    $streamingReleaseFile = $streamingRoot.'/release.marker';
+    $streamingEnvironment['SYNTHETIC_IO_MODE'] = 'streaming';
+    $streamingEnvironment['SYNTHETIC_RELEASE_FILE'] = $streamingReleaseFile;
+    writeSyntheticDistribution($streamingRoot);
+    $streamingResult = runStreamingHandshake(
+        [PHP_BINARY, $streamingRoot.'/bin/composer-policy', 'update', '--dry-run'],
+        $streamingEnvironment,
+        $streamingRoot,
+        $streamingReleaseFile,
+    );
+    assertTrue($streamingResult['observed_before_exit'], 'Delegated stdout must be observable before the child exits.');
+    assertTrue($streamingResult['status'] === 37, 'Delegation must preserve exact child status 37.');
+    assertTrue($streamingResult['stdout'] === "delegated-stdout-before-exit\n", 'Delegated stdout must remain on stdout only.');
+    assertTrue($streamingResult['stderr'] === "delegated-stderr-after-release\n", 'Delegated stderr must remain on stderr only.');
+
+    $largeRoot = createTemporaryRepository($repositoryRoot);
+    $temporaryRoots[] = $largeRoot;
+    $largeTrustedMarker = $largeRoot.'/trusted.marker';
+    $largeShadowMarker = $largeRoot.'/shadow.marker';
+    $largeEnvironment = assertionEnvironment($largeRoot, $largeShadowMarker, $largeTrustedMarker);
+    $largeEnvironment['SYNTHETIC_IO_MODE'] = 'large-output';
+    writeSyntheticDistribution($largeRoot);
+    $largeResult = runCommand([PHP_BINARY, $largeRoot.'/bin/composer-policy', 'update', '--dry-run'], $largeEnvironment, $largeRoot);
+    $expectedStdout = str_repeat('O', 1048576);
+    $expectedStderr = str_repeat('E', 1048576);
+    assertTrue($largeResult['status'] === 37, 'Large delegated output must preserve exact child status 37.');
+    assertTrue(strlen($largeResult['stdout']) === 1048576 && hash('sha256', $largeResult['stdout']) === hash('sha256', $expectedStdout), 'Large delegated stdout must retain its exact byte count and digest.');
+    assertTrue(strlen($largeResult['stderr']) === 1048576 && hash('sha256', $largeResult['stderr']) === hash('sha256', $expectedStderr), 'Large delegated stderr must retain its exact byte count and digest.');
+
+    $preflightRoot = createTemporaryRepository($repositoryRoot);
+    $temporaryRoots[] = $preflightRoot;
+    $preflightTrustedMarker = $preflightRoot.'/trusted.marker';
+    $preflightShadowMarker = $preflightRoot.'/shadow.marker';
+    $preflightEnvironment = assertionEnvironment($preflightRoot, $preflightShadowMarker, $preflightTrustedMarker);
+    $preflightEnvironment['SYNTHETIC_IO_MODE'] = 'preflight-overflow';
+    writeSyntheticDistribution($preflightRoot);
+    $preflightResult = runCommand([PHP_BINARY, $preflightRoot.'/bin/composer-policy', 'validate'], $preflightEnvironment, $preflightRoot);
+    assertTrue($preflightResult['status'] !== 0 && str_contains($preflightResult['stderr'], 'Composer preflight failed.'), 'A preflight channel cap overflow must fail with the fixed diagnostic.');
+    assertOnlyVersionProbeRan($preflightTrustedMarker, $preflightShadowMarker, 'Preflight overflow');
+
+    foreach (['stderr-first', 'stdout-first'] as $order) {
+        $helperProgram = <<<'PHP'
+$chunk = str_repeat(getenv('HELPER_ORDER') === 'stderr-first' ? 'E' : 'O', 1048576);
+$other = str_repeat(getenv('HELPER_ORDER') === 'stderr-first' ? 'O' : 'E', 1048576);
+if (getenv('HELPER_ORDER') === 'stderr-first') {
+    fwrite(STDERR, $chunk);
+    fwrite(STDOUT, $other);
+} else {
+    fwrite(STDOUT, $chunk);
+    fwrite(STDERR, $other);
+}
+PHP;
+        $helperEnvironment = getenv();
+        $helperEnvironment['HELPER_ORDER'] = $order;
+        $helperResult = runCommand([PHP_BINARY, '-r', $helperProgram], $helperEnvironment, $repositoryRoot);
+        assertTrue($helperResult['status'] === 0, "The {$order} helper fixture must complete without deadlock.");
+        assertTrue(strlen($helperResult['stdout']) === 1048576 && hash('sha256', $helperResult['stdout']) === hash('sha256', str_repeat('O', 1048576)), "The {$order} helper must preserve stdout.");
+        assertTrue(strlen($helperResult['stderr']) === 1048576 && hash('sha256', $helperResult['stderr']) === hash('sha256', str_repeat('E', 1048576)), "The {$order} helper must preserve stderr.");
+    }
 
     foreach ([
         'tampered' => static function (string $root): void {
@@ -1523,8 +1713,8 @@ try {
         $environment = assertionEnvironment($root, $shadowMarker, $trustedMarker);
         writeSyntheticDistribution($root);
         $mutate($root);
-        [$status] = runCommand([PHP_BINARY, $root.'/bin/composer-policy', 'install'], $environment, $root);
-        assertTrue($status !== 0, "The {$scenario} distribution must fail closed.");
+        $result = runCommand([PHP_BINARY, $root.'/bin/composer-policy', 'install'], $environment, $root);
+        assertTrue($result['status'] !== 0, "The {$scenario} distribution must fail closed.");
         assertNoComposerRan($trustedMarker, $shadowMarker, "{$scenario} distribution");
     }
 
@@ -1534,8 +1724,8 @@ try {
     $wrongVersionShadowMarker = $wrongVersionRoot.'/shadow.marker';
     $wrongVersionEnvironment = assertionEnvironment($wrongVersionRoot, $wrongVersionShadowMarker, $wrongVersionTrustedMarker);
     writeSyntheticDistribution($wrongVersionRoot, '2.10.3');
-    [$status] = runCommand([PHP_BINARY, $wrongVersionRoot.'/bin/composer-policy', 'install'], $wrongVersionEnvironment, $wrongVersionRoot);
-    assertTrue($status !== 0, 'A distribution reporting another Composer version must fail closed.');
+    $result = runCommand([PHP_BINARY, $wrongVersionRoot.'/bin/composer-policy', 'install'], $wrongVersionEnvironment, $wrongVersionRoot);
+    assertTrue($result['status'] !== 0, 'A distribution reporting another Composer version must fail closed.');
     assertOnlyVersionProbeRan($wrongVersionTrustedMarker, $wrongVersionShadowMarker, 'Wrong-version distribution');
 
     $overrideRoot = createTemporaryRepository($repositoryRoot);
@@ -1562,8 +1752,8 @@ try {
     ] as $name) {
         $environment = $overrideEnvironment;
         $environment[$name] = '1';
-        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'install'], $environment, $overrideRoot);
-        assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), "{$name} must be rejected before Composer starts.");
+        $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'install'], $environment, $overrideRoot);
+        assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer override rejected'), "{$name} must be rejected before Composer starts.");
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, "{$name} override");
     }
 
@@ -1587,8 +1777,8 @@ try {
     foreach ($directorySelectors as $arguments) {
         @unlink($overrideTrustedMarker);
         @unlink($overrideShadowMarker);
-        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
-        assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), 'Every Composer working-directory selector must be rejected.');
+        $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
+        assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer override rejected'), 'Every Composer working-directory selector must be rejected.');
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
     }
 
@@ -1600,8 +1790,8 @@ try {
     ] as $arguments) {
         @unlink($overrideTrustedMarker);
         @unlink($overrideShadowMarker);
-        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
-        assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), 'A policy-free external manifest must not be installable through the guard.');
+        $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $successCallerRoot);
+        assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer override rejected'), 'A policy-free external manifest must not be installable through the guard.');
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
         assertTrue(! file_exists($externalManifestRoot.'/composer.lock'), 'Rejected external installs must not create a lockfile.');
         assertTrue(! is_dir($externalManifestRoot.'/vendor'), 'Rejected external installs must not create a vendor tree.');
@@ -1633,8 +1823,8 @@ try {
     $hostileEnvironment = $overrideEnvironment;
     $hostileEnvironment['COMPOSER_HOME'] = $hostileHome;
     $hostileEnvironment['COMPOSER_AUTH'] = '{"github-oauth":{"github.com":"task-1-auth-sentinel"}}';
-    [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'validate'], $hostileEnvironment, $overrideRoot);
-    assertTrue($status === 0, "The isolated guarded child must still delegate validate: {$output}");
+    $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'validate'], $hostileEnvironment, $overrideRoot);
+    assertTrue($result['status'] === 0, "The isolated guarded child must still delegate validate: {$result['stderr']}");
     $hostileInvocations = array_values(array_filter(explode("\n", (string) file_get_contents($overrideTrustedMarker))));
     assertTrue(count($hostileInvocations) === 3, 'The hostile-home case must run only version, policy, and validate.');
 
@@ -1657,8 +1847,8 @@ try {
     foreach ($allowedCommands as $arguments) {
         @unlink($overrideTrustedMarker);
         @unlink($overrideShadowMarker);
-        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
-        assertTrue($status === 0, 'Canonical guarded command must delegate: '.implode(' ', $arguments)." {$output}");
+        $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
+        assertTrue($result['status'] === 0, 'Canonical guarded command must delegate: '.implode(' ', $arguments)." {$result['stderr']}");
         $invocations = array_values(array_filter(explode("\n", (string) file_get_contents($overrideTrustedMarker))));
         assertTrue(count($invocations) === 3, 'Canonical guarded commands must run version, policy, and delegation only.');
     }
@@ -1682,8 +1872,8 @@ try {
     foreach ($deniedCommands as $arguments) {
         @unlink($overrideTrustedMarker);
         @unlink($overrideShadowMarker);
-        [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
-        assertTrue($status !== 0 && str_contains($output, 'Composer command rejected'), 'Unreviewed command must fail at the command contract: '.implode(' ', $arguments));
+        $result = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', ...$arguments], $overrideEnvironment, $overrideRoot);
+        assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer command rejected'), 'Unreviewed command must fail at the command contract: '.implode(' ', $arguments));
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, implode(' ', $arguments));
     }
 
@@ -1727,8 +1917,8 @@ try {
         $manifest = json_decode((string) file_get_contents($manifestRoot.'/composer.json'), true, 512, JSON_THROW_ON_ERROR);
         $mutateManifest($manifest);
         writeFile($manifestRoot.'/composer.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
-        [$status, $output] = runCommand([PHP_BINARY, $manifestRoot.'/bin/composer-policy', 'update', '--dry-run'], $environment, $manifestRoot);
-        assertTrue($status !== 0 && str_contains($output, 'Composer manifest policy rejected'), "Manifest mutation {$scenario} must fail before Composer.");
+        $result = runCommand([PHP_BINARY, $manifestRoot.'/bin/composer-policy', 'update', '--dry-run'], $environment, $manifestRoot);
+        assertTrue($result['status'] !== 0 && str_contains($result['stderr'], 'Composer manifest policy rejected'), "Manifest mutation {$scenario} must fail before Composer.");
         assertNoComposerRan($trustedMarker, $shadowMarker, "Manifest mutation {$scenario}");
     }
 
