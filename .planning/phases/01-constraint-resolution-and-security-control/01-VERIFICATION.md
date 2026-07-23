@@ -1,137 +1,145 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-verified: 2026-07-23T07:19:01Z
+verified: 2026-07-23T12:05:09Z
 status: gaps_found
 score: 6/7 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
-  previous_score: 2/3
+  previous_score: 6/7
   gaps_closed:
-    - "Caller policy environment variables and machine-global Composer configuration are isolated from guarded children."
-    - "The guarded command surface is restricted to canonical validate, audit, install, and update commands, with exact-policy reassertion before resolver delegation."
-    - "Delegated Composer stdout/stderr channels, live streaming, bounded preflight capture, exact exit status, and deadlock-safe test capture are implemented and behaviorally exercised."
-    - "The previously reproduced workflow scalar, control-structure, alias, wrapper, and PHP process-launch forms are covered."
-    - "A fresh explicitly approved PHP 8.4 Packagist resolver/install/audit run passed through the final hardened guard."
+    - "Bare literal bash/sh/zsh -c and eval payloads are recursively classified by the new bounded evaluator path."
   gaps_remaining:
-    - "Supported workflow and shell routes can still hide direct Composer mutations inside nested shell-evaluation wrappers such as bash -c, sh -c, and eval."
+    - "All supported Composer-bearing execution surfaces fail closed: brace groups, shell function bodies, and workflow php -r programs can still hide direct Composer mutations with zero audit records and zero failures."
   regressions: []
 gaps:
   - truth: "All supported Composer-bearing execution surfaces are detected and either use the complete guard contract or fail closed."
     status: failed
-    reason: "The route audit only recognizes Composer at the outer executable position. In disposable tracked workflow fixtures, bash -c 'composer install', sh -c 'composer update', and eval 'composer install' each produced zero records and zero failures."
+    reason: "The route audit silently drops direct Composer mutations nested in shell brace groups and function bodies. Independent staged workflow fixtures produced records=0 and failures=0 for both forms."
     artifacts:
       - path: "tests/Composer/ComposerPolicyGuardTest.php"
-        issue: "containsComposerExecutableText() and parseInvocation() do not inspect or conservatively reject nested shell-evaluation payloads, so auditRoutes() silently drops these supported workflow commands."
+        issue: "commandChainSegments() splits on parentheses and semicolons but has no brace/function-body grammar; parseInvocation() then sees no evaluator at executable position and classifyShellRouteSegment() returns an empty record list."
     missing:
-      - "Recognize bounded literal bash/sh/zsh -c and eval payloads and recursively classify their command text, or emit an explicit unclassified failure."
-      - "Treat dynamic shell-evaluation payloads in supported routes as unclassified and failing."
-      - "Add disposable Git fixtures for nested shell evaluation and require a non-empty failure record."
+      - "Recursively classify or emit one explicit unclassified failure for Composer-bearing brace groups and shell function bodies."
+      - "Add staged Git regression fixtures that require a nonempty failure for each form."
+  - truth: "All supported Composer-bearing execution surfaces are detected and either use the complete guard contract or fail closed."
+    status: failed
+    reason: "A staged workflow scalar containing php -r 'system(\"composer install\");' produced records=0 and failures=0."
+    artifacts:
+      - path: "tests/Composer/ComposerPolicyGuardTest.php"
+        issue: "parseInvocation() returns null immediately for PHP -r, while the shell fallback only detects Composer executable text; it does not inspect the inline PHP program."
+    missing:
+      - "Treat PHP -r as an executable-code boundary: bounded-parse literal process-launch calls or emit an explicit unclassified failure whenever its literal program is Composer-bearing."
+      - "Add direct and guarded php -r workflow fixtures and require nonempty audit evidence."
 deferred:
   - truth: "The three temporary advisory exceptions are removed or explicitly re-approved at their expiry."
     addressed_in: "Phase 2"
-    evidence: "Each exception explicitly expires at the Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade."
+    evidence: "Phase 2 success criteria require a reviewed lockfile and security check; each current exception explicitly expires at the Phase 2 lockfile review or a compatible stable Core/Laravel upgrade."
 ---
 
 # Phase 1: Constraint Resolution and Security Control Verification Report
 
 **Phase Goal:** Operators can resolve a secure, accurately declared PHP 8.2–8.4 dependency graph on real PHP 8.4 without bypassing Composer safeguards.
-**Verified:** 2026-07-23T07:19:01Z
+**Verified:** 2026-07-23T12:05:09Z
 **Status:** gaps_found
-**Re-verification:** Yes — after Plan 01-07.
+**Re-verification:** Yes — after Plan 01-08.
 
 ## Goal Achievement
 
 ### Observable Truths
 
 | # | Truth | Status | Evidence |
-|---|---|---|---|
-| 1 | A fresh real-PHP-8.4 environment resolves and installs the graph from live Packagist through the final guard without platform emulation, ignore flags, cache, or offline fallback. | ✓ VERIFIED | The explicitly approved PHP 8.4 live gate exited 0 with 807 resolver markers, 807 install markers, Laravel `v11.55.0`, Core `v3.0.2`, configured audit pass, and two isolated empty caller home/cache sets. |
-| 2 | Published Composer metadata declares PHP 8.2, 8.3, and 8.4 support without platform emulation. | ✓ VERIFIED | `composer.json` requires `php: ^8.2`, has no `config.platform`, and guarded strict validation passed on PHP 8.4.23. |
-| 3 | Caller policy variables and machine-global Composer configuration cannot broaden or disable the exact D-02 policy. | ✓ VERIFIED | The full dependency-free suite passed hostile `COMPOSER_HOME`, all pinned policy-variable rejection, private mode-0700 home, no copied config/auth files, and explicit `COMPOSER_AUTH` preservation. |
-| 4 | Only canonical validate, audit, install, and update commands can pass the guard, and install/update reassert the exact manifest immediately before delegation. | ✓ VERIFIED | `ComposerPolicyCommandContract` exposes exactly four allowed commands; the suite rejects aliases, config/global/create-project/self-update/require/remove/selectors and exercises manifest mutation during the policy probe. |
-| 5 | All supported Composer-bearing workflow, shell, wrapper, alias, and PHP execution surfaces are detected and fail closed unless they use the guard contract. | ✗ FAILED | Existing route fixtures pass, but independent disposable workflow probes for `bash -c 'composer install'`, `sh -c 'composer update'`, and `eval 'composer install'` each returned `records=0 failures=0`. |
-| 6 | Composer delegation preserves live, separate stdout/stderr channels and exact status without deadlocking or buffering unbounded delegated output. | ✓ VERIFIED | The full suite passed live-before-exit, channel identity, exact status 37, 1 MiB per-channel hashes, bounded concurrent preflight capture, and both pipe-order helper cases. Production delegation uses matching parent descriptors. |
-| 7 | The pinned Composer executable and canonical checkout boundary cannot be replaced by PATH, COMPOSER_BIN, caller cwd, or Composer working-directory selectors. | ✓ VERIFIED | The suite passed PHAR provenance/digest/version/capability, PATH-shadow non-execution, canonical cwd, and all long/short working-directory rejection cases. |
+| --- | --- | --- | --- |
+| 1 | A fresh real-PHP-8.4 environment resolves and installs the graph through the final guard without platform emulation or ignore flags. | ✓ VERIFIED | Re-verification quick regression: current PHP is 8.4.23, the pinned Composer PHAR is 2.10.2 with matching digest, exact manifest validation passes through `bin/composer-policy`, and Plan 08 changed only the audit test. The prior verifier independently ran the unchanged two-checkout live gate successfully. |
+| 2 | Published Composer metadata declares PHP 8.2, 8.3, and 8.4 support without platform emulation. | ✓ VERIFIED | Current JSON assertion passed: `require.php` is `^8.2`, `config.platform` and legacy audit config are absent, and `php bin/composer-policy validate --strict --no-check-publish` passed. |
+| 3 | Roave is removed while platform checks and a narrow blocking dependency-security safeguard remain enabled. | ✓ VERIFIED | `composer.json` has no Roave, sets `ignore-unreachable: false`, `block: true`, `audit: fail`, and only the three documented IDs; the guard reasserts these exact values before install/update delegation. |
+| 4 | The guard accepts only canonical commands and binds them to the integrity-checked repository Composer 2.10.2 PHAR under `PHP_BINARY`. | ✓ VERIFIED | Current full dependency-free suite passed; source verifies the PHAR digest/version/policy probe and delegates `[PHP_BINARY, $composerPath, ...$arguments]`. |
+| 5 | All supported Composer-bearing workflow, shell, wrapper, alias, and PHP execution surfaces are detected and fail closed unless guarded. | ✗ FAILED | Independent staged workflow probes for a brace group, a function body, and inline `php -r` each returned `records=0 failures=0`; a direct dependency mutation can therefore evade the supported-route security control. |
+| 6 | Delegated Composer stdout/stderr/status behavior remains safe and exact. | ✓ VERIFIED | The current full dependency-free suite passed; Plan 08 did not modify the guard or process-I/O implementation. |
+| 7 | The caller cannot replace the pinned Composer executable or project through PATH, `COMPOSER_BIN`, or working-directory selectors. | ✓ VERIFIED | Guard source uses repository-derived PHAR/provenance paths, rejects `COMPOSER_BIN` and selectors, and the full suite passed. |
 
 **Score:** 6/7 truths verified (0 present, behavior-unverified)
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
-|---|---|---|---|
-| `composer.json` | Honest PHP contract and exact native advisory policy without Roave. | ✓ VERIFIED | `^8.2`, Laravel `^11.0`, Core `^3.0`, `ignore-unreachable: false`, block=true, audit=fail, exactly three documented IDs, no Roave/platform/legacy audit keys. |
-| `tools/composer/composer-2.10.2.phar` | Fixed policy-capable Composer distribution. | ✓ VERIFIED | Exists, exact version, matching SHA-256, invoked through `PHP_BINARY`. |
-| `tools/composer/composer-2.10.2.phar.sha256` | Strict release provenance. | ✓ VERIFIED | Exactly four lines; digest matches the PHAR. |
-| `bin/composer-policy` | Isolated, allowlisted, canonical-root policy guard with correct process I/O. | ✓ VERIFIED | Substantive and behaviorally exercised by the full dependency-free suite. |
-| `tools/composer/ComposerPolicyCommandContract.php` | Shared bounded command contract. | ✓ VERIFIED | Loaded by both the guard and route audit; exactly four canonical commands allowed. |
-| `tests/Composer/ComposerPolicyGuardTest.php` | Adversarial enforcement and complete fail-closed route regressions. | ✗ PARTIAL / BLOCKER | Enforcement and listed route tests pass, but nested shell-evaluation wrappers silently disappear. |
-| `tests/Composer/ComposerPolicyLivePackagistTest.php` | Repeatable fresh PHP 8.4 Packagist proof. | ✓ VERIFIED | Explicitly approved PHP 8.4 execution passed both independent no-cache Packagist paths and configured audit. |
-| `.github/workflows/ci.yml`, `README.md` | Current supported dependency routes use the guard. | ✓ WIRED | Production route audit reports exactly CI install and README install/update as guarded. |
+| --- | --- | --- | --- |
+| `composer.json` | Honest PHP contract and exact native advisory policy without Roave. | ✓ VERIFIED | Substantive and consumed by guard policy reassertion; exact current assertion passed. |
+| `tools/composer/composer-2.10.2.phar` and `.sha256` | Fixed Composer distribution and strict provenance. | ✓ VERIFIED | PHAR exists, reports 2.10.2 on PHP 8.4.23, and SHA-256 matches the four-line record. |
+| `bin/composer-policy` | Isolated, allowlisted, canonical-root policy guard. | ✓ VERIFIED | 426-line substantive guard is wired from CI/README and passed direct strict validation plus the full regression suite. |
+| `tools/composer/ComposerPolicyCommandContract.php` | Shared canonical command contract. | ✓ VERIFIED | Guard and audit both require/use the four-command decision. |
+| `tests/Composer/ComposerPolicyGuardTest.php` | Fail-closed route audit including nested evaluators. | ⚠️ PARTIAL / BLOCKER | 2,471-line substantive test/audit artifact is wired and its supplied suite passes, but its parser has observable zero-record routes for brace groups/functions and inline PHP. |
+| `.github/workflows/ci.yml`, `README.md` | Supported install/update routes invoke the guard. | ✓ VERIFIED | Current production audit emitted exactly three guarded CI/README records. |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
-|---|---|---|---|---|
-| Caller environment/global home | Composer 2.10.2 policy engine | pinned override rejection and private guard-created Composer home | ✓ WIRED | Hostile home/config/auth regressions pass. |
-| Guard argv | Shared command contract | `ComposerPolicyCommandContract::decide()` before PHAR execution | ✓ WIRED | Denied commands leave no Composer marker. |
-| Install/update | Exact repository policy | manifest assertion before probes and immediately before delegation | ✓ WIRED | Mutation-during-probe regression stops after the policy probe. |
-| Route audit | Supported workflow/shell/PHP execution | bounded scalar/token/process parser plus fail-closed fallback | ✗ PARTIAL / BLOCKER | Direct listed forms are caught; nested shell-evaluation payloads produce no record. |
-| Delegated Composer | Caller stdout/stderr | direct matching process descriptors | ✓ WIRED | Live streaming, channel identity, large output, and status regressions pass. |
-| Live PHP 8.4 checkout | Packagist graph/audit | isolated no-cache guarded resolver and install | ✓ FLOWING | 807 direct resolver markers and 807 direct install markers; tagged Laravel 11/Core 3; configured audit passed. |
+| --- | --- | --- | --- | --- |
+| CI and README routes | `bin/composer-policy` | `php bin/composer-policy` install/update commands | ✓ WIRED | Production audit emitted CI install plus README install/update as supported. |
+| Guard | checked-in PHAR/provenance | root-relative files, SHA-256, exact-version and policy probes through `PHP_BINARY` | ✓ WIRED | Static inspection and full regression suite pass. |
+| Guard install/update | exact manifest policy | reassertion before and after probes | ✓ WIRED | Source has the two reassertions before final delegation. |
+| Supported workflow/shell scalar | nested command/evaluator payload | command segmentation, token parsing, bounded recursive evaluator classification | ✗ NOT WIRED / BLOCKER | Only an outer `bash`/`sh`/`zsh`/`eval` invocation is handled. Compound groups and functions hide the evaluator. |
+| Supported workflow scalar | inline PHP process launch | `php -r` parsing to a route-audit record | ✗ NOT WIRED / BLOCKER | `parseInvocation()` returns `null` for `-r`; the fallback does not inspect the program. |
 
-### Data-Flow Trace
+### Data-Flow Trace (Level 4)
 
-| Artifact | Data / Input | Source | Produces Correct Data | Status |
-|---|---|---|---|---|
-| `composer.json` | PHP/Laravel/Core constraints and advisory policy | committed manifest → exact-policy assertion → Composer | Yes | ✓ FLOWING |
-| `bin/composer-policy` | caller environment | hostile caller state → private child home + override rejection | Yes | ✓ FLOWING |
-| Route audit | supported dependency command text | tracked workflow/shell/PHP → bounded parser → records | No for nested shell evaluators | ✗ DISCONNECTED EDGE |
-| Composer delegation | stdout/stderr/status | child direct descriptors → parent channels | Yes | ✓ FLOWING |
-| Live integration gate | Packagist metadata | direct no-cache network fetch → temporary solver/install | Yes | ✓ FLOWING |
+| Artifact | Data / Input | Source | Produces Real Security Evidence | Status |
+| --- | --- | --- | --- | --- |
+| `composer.json` | PHP/dependency/advisory policy | committed manifest → guard exact-policy assertion → Composer | Yes | ✓ FLOWING |
+| `bin/composer-policy` | caller argv/environment | override rejection → pinned PHAR → checked delegation | Yes | ✓ FLOWING |
+| Route audit | tracked workflow/shell/PHP command text | `git ls-files` → scalar/parser → route records | No for compound shell/inline-PHP edges | ✗ DISCONNECTED EDGE |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command / Probe | Result | Status |
-|---|---|---|---|
-| PHP syntax | `php -l` on guard, command contract, guard test, and live test | All four passed. | ✓ PASS |
-| Guard enforcement, I/O, and deadlock safety | `php tests/Composer/ComposerPolicyGuardTest.php` | Exit 0 in 14.46s. | ✓ PASS |
-| Production route inventory | `php tests/Composer/ComposerPolicyGuardTest.php --route-audit` | Exit 0; three supported guarded records. | ✓ PASS for current literals |
-| Nested shell-evaluation routes | Disposable tracked workflow fixtures using bash-c, sh-c, and eval payloads | Each returned zero records and zero failures. | ✗ FAIL |
-| Guarded strict metadata validation | `php bin/composer-policy validate --strict --no-check-publish` | Exit 0; `composer.json is valid`. | ✓ PASS |
-| Fresh Packagist resolver/install | Herd PHP 8.4 `tests/Composer/ComposerPolicyLivePackagistTest.php` | Exit 0; resolver markers=807; install markers=807; Laravel v11.55.0; Core v3.0.2; audit pass; two isolated empty home/cache sets. | ✓ PASS |
+| --- | --- | --- | --- |
+| Audit test syntax | `php -l tests/Composer/ComposerPolicyGuardTest.php` | No syntax errors. | ✓ PASS |
+| Existing evaluator regressions | `php tests/Composer/ComposerPolicyGuardTest.php --group=route-audit-fail-closed` | Passed. | ✓ PASS |
+| Full dependency-free guard suite | `php tests/Composer/ComposerPolicyGuardTest.php` | Passed. | ✓ PASS |
+| Current production route inventory | `php tests/Composer/ComposerPolicyGuardTest.php --route-audit` | Passed with exactly three guarded CI/README records. | ✓ PASS, incomplete coverage |
+| Brace-group direct evaluator | Disposable staged workflow: `{ bash -c 'composer install'; }` | `records=0 failures=0`. | ✗ FAIL |
+| Function-body direct evaluator | Disposable staged workflow function containing `bash -c 'composer install'` | `records=0 failures=0`. | ✗ FAIL |
+| Inline-PHP direct evaluator | Disposable staged workflow: `php -r 'system("composer install");'` | `records=0 failures=0`. | ✗ FAIL |
+| Current metadata/guard boundary | Exact JSON policy assertion; `php bin/composer-policy validate --strict --no-check-publish` | Both passed; no root lockfile/vendor. | ✓ PASS |
 
 ### Probe Execution
 
-Step 7c: SKIPPED — no `scripts/*/tests/probe-*.sh` is declared. The dependency-free guard suite, production route audit, disposable adversarial probes, and live integration entry point were executed directly.
+Step 7c: SKIPPED — no declared `scripts/*/tests/probe-*.sh` probes. The dependency-free audit suite and isolated staged workflow probes were executed directly.
 
 ### Requirements Coverage
 
 | Requirement | Source Plans | Description | Status | Evidence |
-|---|---|---|---|---|
-| COMP-01 | 01-01, 01-02, 01-05, 01-06, 01-07 | Clean PHP 8.4 standard install without platform ignores or emulation. | ✓ SATISFIED | Explicitly approved final live gate passed both no-cache PHP 8.4 Packagist paths and configured audit. |
-| COMP-02 | 01-02, 01-05, 01-06, 01-07 | Accurate PHP 8.2–8.4 declaration. | ✓ SATISFIED | Root `^8.2`, no platform emulation, guarded strict validation on PHP 8.4.23. |
-| COMP-03 | 01-01 through 01-07 | Remove the Roave conflict without weakening platform checks or the replacement safeguard. | ✗ BLOCKED | Policy/global isolation, allowlist, PHAR trust, and process I/O pass, but supported nested shell routes can bypass the audit without a failure record. |
+| --- | --- | --- | --- | --- |
+| COMP-01 | 01-01, 01-02, 01-05 through 01-08 | Clean PHP 8.4 install without platform ignores or emulation. | ✓ SATISFIED | Prior independent live evidence remains unchanged; current PHP/PHAR/manifest/guard regression sanity checks pass. |
+| COMP-02 | 01-02, 01-05 through 01-08 | Accurate PHP 8.2–8.4 declaration. | ✓ SATISFIED | Current `^8.2` plus no platform emulation and strict guarded validation. |
+| COMP-03 | 01-01 through 01-08 | Roave conflict removed without weakening platform checks or the replacement safeguard. | ✗ BLOCKED | A direct Composer mutation in supported compound/inline code routes disappears rather than failing audit. |
 
-No Phase 1 requirement is orphaned. `composer.lock` and root `vendor/` remain absent as required by the Phase 1/Phase 2 boundary.
+No Phase 1 requirement is orphaned. `composer.lock` and root `vendor/` remain absent at the intentional Phase 1/Phase 2 boundary.
 
-### Anti-Patterns and Finding Disposition
+### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
-|---|---:|---|---|---|
-| `tests/Composer/ComposerPolicyGuardTest.php` | 1155 | Fail-open Composer-text detector only inspects the outer executable position. | 🛑 BLOCKER | Nested shell-evaluation wrappers disappear from supported route evidence. |
-| Phase implementation artifacts | — | `TBD`, `FIXME`, or `XXX` | None | No unreferenced debt marker found. |
+| --- | ---:| --- | --- | --- |
+| `tests/Composer/ComposerPolicyGuardTest.php` | 514 | Segmenter lacks brace/function structure while splitting shell separators. | 🛑 BLOCKER | Direct nested evaluator is not presented to classifier. |
+| `tests/Composer/ComposerPolicyGuardTest.php` | 1071 | `php -r` is immediately treated as non-executing. | 🛑 BLOCKER | Inline `system("composer install")` disappears from the route audit. |
+| `tests/Composer/ComposerPolicyGuardTest.php` | 1425 | `null`/empty records are valid parser flow-control elsewhere. | ℹ️ Info | Not classified as a stub; the fixtures above prove the specific harmful paths. |
+
+No unreferenced `TBD`, `FIXME`, or `XXX` debt markers were found in the Plan 01-08 implementation file.
+
+### Deferred Items
+
+| # | Item | Addressed In | Evidence |
+| --- | --- | --- | --- |
+| 1 | Reassess/remove temporary advisory exceptions. | Phase 2 | Phase 2 is the reviewed lockfile/security snapshot phase; the current exception text names that review as its expiry. |
 
 ### Gaps Summary
 
-Plan 01-07 closes the prior effective-policy, command-surface, and process-I/O blockers. It also covers the specifically enumerated YAML, shell-control, alias, wrapper, and PHP fixtures. The route audit is still not fail closed for nested shell evaluators: direct Composer operations inside `bash -c`, `sh -c`, or `eval` are valid supported workflow commands but become zero records. That contradicts Plan 01-07's must-have that unclassifiable Composer-bearing supported execution text must fail closed.
+Plan 01-08 closes the previously demonstrated plain `bash`/`sh`/`zsh`/`eval` payload bypasses, but it does not achieve the broader Phase 01 requirement that every supported Composer-bearing execution route is detected or fails closed. The supplied suite is misleading here: it covers only evaluator-at-executable-position and PHP source files, not evaluator calls inside compound shell syntax or a workflow's inline PHP program. Because all three independent direct-mutation probes returned an empty record list and no failure, COMP-03 and the phase goal remain blocked.
 
-The fresh explicitly approved PHP 8.4 integration passed both independent Packagist paths and the configured audit. COMP-01 and COMP-02 are satisfied; the remaining blocker is confined to COMP-03 route-audit fail-closed coverage.
-
-**Next action:** Do not advance Phase 1 as passed. Add a bounded nested-shell route policy (literal payloads recursively classified; dynamic payloads explicitly unclassified), add the three disposable regressions, rerun the full guard suite and production route audit, then re-verify.
+**Next action:** add a focused gap-closure plan for compound shell and inline-PHP route audit coverage; do not proceed to Phase 2 as though Phase 1 passed.
 
 ---
 
-_Verified: 2026-07-23T07:19:01Z_
+_Verified: 2026-07-23T12:05:09Z_
 _Verifier: the agent (gsd-verifier)_

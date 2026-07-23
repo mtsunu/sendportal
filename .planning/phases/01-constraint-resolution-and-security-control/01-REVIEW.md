@@ -1,109 +1,86 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-reviewed: 2026-07-23T04:27:22Z
-depth: deep
-files_reviewed: 6
+reviewed: 2026-07-23T11:59:58Z
+depth: standard
+files_reviewed: 9
 files_reviewed_list:
-  - bin/composer-policy
-  - tests/Composer/ComposerPolicyGuardTest.php
-  - composer.json
-  - tools/composer/composer-2.10.2.phar.sha256
   - .github/workflows/ci.yml
   - README.md
+  - bin/composer-policy
+  - composer.json
+  - tests/Composer/ComposerPolicyGuardTest.php
+  - tests/Composer/ComposerPolicyLivePackagistTest.php
+  - tools/composer/ComposerPolicyCommandContract.php
+  - tools/composer/composer-2.10.2.phar
+  - tools/composer/composer-2.10.2.phar.sha256
 findings:
-  critical: 5
-  warning: 2
+  critical: 2
+  warning: 1
   info: 0
-  total: 7
+  total: 3
 status: issues_found
 ---
 
 # Phase 01: Code Review Report
 
-**Reviewed:** 2026-07-23T04:27:22Z
-**Depth:** deep
-**Files Reviewed:** 6
+**Reviewed:** 2026-07-23T11:59:58Z
+**Depth:** standard
+**Files Reviewed:** 9
 **Status:** issues_found
 
 ## Summary
 
-The pinned PHAR provenance, checksum comparison, exact-version check, policy-capability probe, canonical initial cwd, and explicit working-directory-option rejection are correctly implemented. The manifest also retains the intended PHP `^8.2`, Laravel `^11.0`, Core `^3.0`, fail-closed unreachable-policy setting, and exact three documented advisory exceptions.
-
-The security boundary is still bypassable. Composer 2.10's actual advisory-block override is not rejected; inherited global configuration can add broad policy exceptions; and unrestricted Composer subcommands can mutate the policy or switch to an external project after the canonical process cwd is established. The tracked-route audit is fail-open for common valid shell/YAML forms, while output forwarding now changes Composer's stdout/stderr contract. The dependency-free security tests themselves are neither deadlock-safe nor run in CI, and no committed CI job exercises the target PHP 8.4 runtime.
-
-Review evidence included the complete Phase 01 plan/summary and commit sequence, the dependency-free suite, the production route audit, local Composer 2.10.2 source inspection, and adversarial disposable-repository probes. Existing tests and the route audit pass, but the bypass probes below are not covered.
+The pinned Composer distribution's recorded SHA-256 matches the checked-in PHAR, the guard retains the exact policy and isolated Composer home, and the declared lint, focused, full-suite, and production route-audit commands pass. The new bounded evaluator parser is nevertheless fail-open for valid shell compound forms: a direct Composer command nested in a function or brace group produces no audit record or failure. Inline PHP launched by a workflow has the same fail-open path. These defeat the Phase 01 supported-route security control and must be fixed before shipping.
 
 ## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: Composer's real advisory-block environment override bypasses the guard
+### CR-01: Compound shell syntax hides nested evaluators from the route audit
 
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/bin/composer-policy:120-125`; `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:1034-1040`
+**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:464-555, 898-1169, 1425-1523`
 **Classification:** BLOCKER
 
-**Issue:** The rejection list omits `COMPOSER_POLICY_ADVISORIES_BLOCK`. The pinned Composer 2.10.2 implementation reads this variable after parsing configuration and replaces the effective `policy.advisories.block` value. With `COMPOSER_POLICY_ADVISORIES_BLOCK=0`, the current guard completed all three synthetic-distribution invocations and exited successfully instead of rejecting before Composer started. The regression matrix repeats the same incomplete environment list, so the native blocking safeguard can be disabled without a failing test.
+**Issue:** `commandChainSegments()` splits parentheses but not brace groups, and `parseInvocation()` only recognizes an evaluator when it is the executable after its small wrapper set. Therefore valid workflow shell such as:
 
-**Fix:** Reject any nonempty `COMPOSER_POLICY_ADVISORIES_BLOCK` before PHAR verification or execution and add a marker-based regression proving zero Composer invocations. Audit the pinned release's remaining `COMPOSER_POLICY_*`/security-control environment variables whenever the PHAR version changes rather than maintaining an assumed legacy list.
+```sh
+function runner() { bash -c 'composer install'; }
+runner
+```
 
-### CR-02: Inherited global Composer configuration broadens the exact-three exception
+or `{ bash -c 'composer install'; }` reaches neither evaluator recursion nor the unclassified fallback. A disposable tracked workflow fixture returned `records: []` and `failures: []`, even though it executes a direct Composer install. This directly violates the plan's requirement that nested literal evaluator payloads cannot disappear.
 
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/bin/composer-policy:23-30,167-179`; `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:140-167`
+**Fix:** Before treating an invocation as absent, recursively handle supported compound forms (at minimum `{ ...; }` and function bodies) or emit an `unclassified` record whenever a supported production scalar contains Composer/evaluator text inside an unparsed compound construct. Add regression fixtures for direct and guarded commands in brace groups and function bodies, requiring a nonempty failure for the direct form.
+
+### CR-02: Workflow `php -r` can execute direct Composer with zero audit evidence
+
+**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:1067-1122, 1207-1257, 1425-1447`
 **Classification:** BLOCKER
 
-**Issue:** Every Composer subprocess inherits the caller's `COMPOSER_HOME` and global configuration. Composer deep-merges global policy maps with the project manifest. A disposable global config containing `policy.advisories.ignore-severity: [high]` remained present alongside the three project `ignore-id` entries when invoked through the guard. This violates the phase's exact-exception requirement and lets machine-local state silently suppress additional advisories. The test environment inherits the host home and never supplies hostile global policy.
+**Issue:** `parseInvocation()` returns `null` immediately for PHP's `-r` option, treating it as non-executing, while `containsComposerExecutableText()` only inspects the outer executable and not the inline PHP program. Consequently a tracked workflow scalar such as `php -r 'system("composer install");'` yields `records: []` and `failures: []`. The command runs a direct dependency mutation but bypasses the documented fail-closed route audit.
 
-**Fix:** Run guarded Composer processes with a repository-controlled empty/dedicated `COMPOSER_HOME`; carry credentials through an explicit mechanism such as `COMPOSER_AUTH`. Add hostile-home tests for extra `ignore`, `ignore-id`, `ignore-severity`, platform, repository, and transport configuration, and assert none reaches the effective guarded configuration.
-
-### CR-03: Unrestricted subcommands can disable policy or leave the canonical project
-
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/bin/composer-policy:156-179`; `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:732-746,771-775`
-**Classification:** BLOCKER
-
-**Issue:** The guard forwards any nonempty command after checking only a short option/environment denylist. In a disposable checkout, `php bin/composer-policy config policy.advisories.block false` exited successfully and rewrote the committed setting to `false`. The route audit ignored that first segment and approved an adjacent guarded `update`, producing no failure. The same unrestricted delegation accepts `global ...`, command-local `config/policy --file`, and `create-project`; those commands intentionally change to or create another project despite the claimed canonical-root policy boundary. The audit explicitly treats guarded `create-project` as supported.
-
-**Fix:** Parse Composer global options and enforce an explicit command contract. Reject `config`, `policy` mutations, `global`, `create-project`, `self-update`, command-local `--file`, and every unreviewed subcommand. Allow only the repository operations actually required (for example install/update plus read-only validate/audit), then assert the exact manifest policy immediately before any resolver operation. Make the route audit fail any guarded invocation outside the same allowlist.
-
-### CR-04: The tracked-route audit fails open for valid shell and YAML commands
-
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:442-521,528-746,781-831,793-800`
-**Classification:** BLOCKER
-
-**Issue:** The custom parser recognizes only a narrow set of prefixes and line-local YAML shapes. Disposable supported workflow fixtures containing each of the following returned zero records and zero failures: a folded scalar split as `run: >` / `composer` / `install`, `- run: composer install`, `if composer install; then ...; fi`, `(composer install)`, and `timeout 30 composer install`. Composer aliases such as `i`/`u` are also outside the verb allowlist, and lines 793-800 skip every PHP file, including future production deployment scripts. Consequently, a tracked CI/operator route can invoke Composer directly while the audit still reports clean.
-
-**Fix:** Parse YAML scalars with a YAML parser and executable shell with a real shell AST, then inspect every command node and wrapper recursively. Add Composer mutation aliases and production PHP execution surfaces. Until complete parsing exists, fail closed in supported paths whenever Composer-like executable text cannot be confidently classified; do not convert an unrecognized form into "no invocation."
-
-### CR-05: Delegation corrupts Composer's stdout/stderr contract
-
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/bin/composer-policy:23-39,179-181`
-**Classification:** BLOCKER
-
-**Issue:** The deadlock repair redirects child stderr into stdout, buffers the entire merged stream, and finally writes it all to wrapper stdout. A direct `composer --version -vvv` emitted 44 bytes to stdout and 219 bytes to stderr; the guarded command emitted all 263 bytes to stdout and zero to stderr. This can corrupt machine-readable stdout (for example JSON audit/show output combined with verbose diagnostics), breaks callers that distinguish errors from results, suppresses live progress/prompts until exit, and retains unbounded command output in memory.
-
-**Fix:** Use separate probe and delegation paths. For bounded preflight probes, drain stdout/stderr concurrently with `stream_select()` and enforce an output limit. For the delegated Composer command, connect child stdout and stderr directly to the parent's corresponding descriptors (or multiplex and forward each stream incrementally) and preserve the exact exit status. Add channel-specific and large-output regressions.
+**Fix:** Treat `php -r` as an executable code boundary. Parse a bounded literal program for the same process-launch calls already covered in PHP files, or fail closed with an `unclassified` record whenever its literal program contains Composer/guard text; dynamic code must also be unclassified. Add direct and guarded `php -r` workflow fixtures.
 
 ## Warnings
 
-### WR-01: The test process helper still has the original two-pipe deadlock
+### WR-01: CI never executes the standalone security-route regression suite
 
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/tests/Composer/ComposerPolicyGuardTest.php:34-52`
+**File:** `/Users/meigire/Work/idai-jatim/sendportal/.github/workflows/ci.yml:40-53`
 **Classification:** WARNING
 
-**Issue:** `runCommand()` drains stdout to EOF before reading stderr. A child that writes 1 MiB to stderr before closing stdout caused the test process to exceed a three-second timeout (exit 124). A future negative case or Git/Composer diagnostic can therefore hang the security suite instead of producing a result.
+**Issue:** The workflow installs dependencies and runs PHPUnit, but neither `ComposerPolicyGuardTest.php` nor its `--route-audit` mode is a PHPUnit test. The regressions that should have caught CR-01 and CR-02 can therefore remain green locally while every CI run passes.
 
-**Fix:** Drain both pipes concurrently with nonblocking streams and `stream_select()`, or merge them when channel identity is irrelevant. Add a regression whose child alternates output larger than the platform pipe capacity on both streams.
+**Fix:** Add a dependency-free step before installation, for example:
 
-### WR-02: Security regressions and PHP 8.4 are absent from committed CI
-
-**File:** `/Users/meigire/Work/idai-jatim/sendportal/.github/workflows/ci.yml:8-11,40-53`
-**Classification:** WARNING
-
-**Issue:** CI includes only PHP 8.2 and 8.3 containers and runs only dependency installation plus PHPUnit. The dependency-free guard suite and `--route-audit` mode are standalone scripts, so PHPUnit does not execute them. The PHP 8.4 resolver/install evidence in phase summaries is one-off evidence and cannot detect regressions after these files change.
-
-**Fix:** Add PHP 8.4 to the CI matrix and run both `php tests/Composer/ComposerPolicyGuardTest.php` and its `--route-audit` mode before dependency installation. Keep the isolated live-Packagist integration gate separate if its network cost is unsuitable for every job, but ensure at least one required CI job exercises the guard on PHP 8.4.
+```yaml
+- name: Verify Composer policy routes
+  run: |
+    php tests/Composer/ComposerPolicyGuardTest.php
+    php tests/Composer/ComposerPolicyGuardTest.php --route-audit
+```
 
 ---
 
-_Reviewed: 2026-07-23T04:27:22Z_
+_Reviewed: 2026-07-23T11:59:58Z_
 _Reviewer: the agent (gsd-code-reviewer)_
-_Depth: deep_
+_Depth: standard_
