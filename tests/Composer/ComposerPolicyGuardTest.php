@@ -8,6 +8,10 @@ declare(strict_types=1);
  * Run with: php tests/Composer/ComposerPolicyGuardTest.php
  */
 
+const MAX_ROUTE_LOGICAL_LINE_LENGTH = 16384;
+const MAX_ROUTE_SEGMENTS = 64;
+const MAX_ROUTE_TOKENS = 256;
+
 function fail(string $message): never
 {
     fwrite(STDERR, "FAIL: {$message}\n");
@@ -222,6 +226,10 @@ function normalizedLogicalLines(string $contents): array
         $fragment = $continues ? substr($trimmed, 0, -1) : $line;
         $buffer .= ($buffer === '' ? '' : ' ').$fragment;
 
+        if (strlen($buffer) > MAX_ROUTE_LOGICAL_LINE_LENGTH) {
+            throw new RuntimeException('Route audit logical line length exceeds the configured bound.');
+        }
+
         if (! $continues) {
             $logicalLines[] = [
                 'line' => $startLine,
@@ -244,29 +252,281 @@ function normalizedLogicalLines(string $contents): array
 /**
  * @return list<string>
  */
-function commandChainSegments(string $logicalLine): array
+function commandChainSegments(string $logicalLine, bool $strict = true): array
 {
-    return array_values(array_filter(
-        array_map('trim', preg_split('/(?:&&|\|\||;|\|)/', $logicalLine)),
-        static fn (string $segment): bool => $segment !== '',
-    ));
+    if (strlen($logicalLine) > MAX_ROUTE_LOGICAL_LINE_LENGTH) {
+        throw new RuntimeException('Route audit logical line length exceeds the configured bound.');
+    }
+
+    $segments = [];
+    $buffer = '';
+    $quote = null;
+    $escaped = false;
+    $length = strlen($logicalLine);
+
+    for ($index = 0; $index < $length; ++$index) {
+        $character = $logicalLine[$index];
+
+        if ($escaped) {
+            $buffer .= $character;
+            $escaped = false;
+
+            continue;
+        }
+
+        if ($character === '\\' && $quote !== "'") {
+            $buffer .= $character;
+            $escaped = true;
+
+            continue;
+        }
+
+        if ($character === "'" && $quote === "'") {
+            $quote = null;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($character === '"' && $quote === '"') {
+            $quote = null;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($quote === null && in_array($character, ["'", '"'], true)) {
+            $quote = $character;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($quote === null && in_array($character, ['&', '|', ';'], true)) {
+            if (($character === '&' || $character === '|') && ($logicalLine[$index + 1] ?? null) === $character) {
+                ++$index;
+            }
+
+            $segment = trim($buffer);
+
+            if ($segment !== '') {
+                $segments[] = $segment;
+
+                if (count($segments) > MAX_ROUTE_SEGMENTS) {
+                    throw new RuntimeException('Route audit segment count exceeds the configured bound.');
+                }
+            }
+
+            $buffer = '';
+
+            continue;
+        }
+
+        $buffer .= $character;
+    }
+
+    if ($strict && $escaped) {
+        throw new RuntimeException('Route audit encountered a dangling escape.');
+    }
+
+    if ($strict && $quote !== null) {
+        throw new RuntimeException('Route audit encountered an unterminated quote.');
+    }
+
+    $segment = trim($buffer);
+
+    if ($segment !== '') {
+        $segments[] = $segment;
+    }
+
+    if (count($segments) > MAX_ROUTE_SEGMENTS) {
+        throw new RuntimeException('Route audit segment count exceeds the configured bound.');
+    }
+
+    return $segments;
 }
 
 /**
  * @return list<string>
  */
-function commandTokens(string $segment): array
+function commandTokens(string $segment, bool $strict = true): array
 {
-    return array_values(array_filter(preg_split('/\s+/', trim($segment)), static fn (string $token): bool => $token !== ''));
+    $tokens = [];
+    $token = '';
+    $tokenStarted = false;
+    $quote = null;
+    $escaped = false;
+    $length = strlen($segment);
+
+    $appendToken = static function () use (&$tokens, &$token, &$tokenStarted): void {
+        if (! $tokenStarted) {
+            return;
+        }
+
+        $tokens[] = $token;
+        $token = '';
+        $tokenStarted = false;
+
+        if (count($tokens) > MAX_ROUTE_TOKENS) {
+            throw new RuntimeException('Route audit token count exceeds the configured bound.');
+        }
+    };
+
+    for ($index = 0; $index < $length; ++$index) {
+        $character = $segment[$index];
+
+        if ($escaped) {
+            $token .= $character;
+            $tokenStarted = true;
+            $escaped = false;
+
+            continue;
+        }
+
+        if ($character === '\\' && $quote !== "'") {
+            $tokenStarted = true;
+            $escaped = true;
+
+            continue;
+        }
+
+        if ($character === "'" && $quote === "'") {
+            $quote = null;
+            $tokenStarted = true;
+
+            continue;
+        }
+
+        if ($character === '"' && $quote === '"') {
+            $quote = null;
+            $tokenStarted = true;
+
+            continue;
+        }
+
+        if ($quote === null && in_array($character, ["'", '"'], true)) {
+            $quote = $character;
+            $tokenStarted = true;
+
+            continue;
+        }
+
+        if ($quote === null && ctype_space($character)) {
+            $appendToken();
+
+            continue;
+        }
+
+        $token .= $character;
+        $tokenStarted = true;
+    }
+
+    if ($strict && $escaped) {
+        throw new RuntimeException('Route audit encountered a dangling escape.');
+    }
+
+    if ($strict && $quote !== null) {
+        throw new RuntimeException('Route audit encountered an unterminated quote.');
+    }
+
+    $appendToken();
+
+    return $tokens;
+}
+
+function isPotentialInvocationSegment(string $segment): bool
+{
+    return parseInvocation(commandTokens($segment, false)) !== null;
+}
+
+function unquoteYamlCommandScalar(string $logicalLine): string
+{
+    foreach (['run:', 'command:'] as $prefix) {
+        if (! str_starts_with($logicalLine, $prefix)) {
+            continue;
+        }
+
+        $value = ltrim(substr($logicalLine, strlen($prefix)));
+        $quote = $value[0] ?? '';
+
+        if (! in_array($quote, ["'", '"'], true)) {
+            return $logicalLine;
+        }
+
+        $decoded = '';
+        $closingIndex = null;
+        $escaped = false;
+        $length = strlen($value);
+
+        for ($index = 1; $index < $length; ++$index) {
+            $character = $value[$index];
+
+            if ($quote === '"') {
+                if ($escaped) {
+                    $escaped = false;
+
+                    continue;
+                }
+
+                if ($character === '\\') {
+                    $escaped = true;
+
+                    continue;
+                }
+            }
+
+            if ($character !== $quote) {
+                if ($quote === "'") {
+                    $decoded .= $character;
+                }
+
+                continue;
+            }
+
+            if ($quote === "'" && ($value[$index + 1] ?? null) === "'") {
+                $decoded .= "'";
+                ++$index;
+
+                continue;
+            }
+
+            $closingIndex = $index;
+
+            break;
+        }
+
+        if ($closingIndex === null) {
+            return $logicalLine;
+        }
+
+        $remainder = ltrim(substr($value, $closingIndex + 1));
+
+        if ($remainder !== '' && ! str_starts_with($remainder, '#')) {
+            return $logicalLine;
+        }
+
+        if ($quote === '"') {
+            $decodedValue = json_decode(substr($value, 0, $closingIndex + 1), true);
+
+            if (! is_string($decodedValue)) {
+                return $logicalLine;
+            }
+
+            $decoded = $decodedValue;
+        }
+
+        return $prefix.' '.$decoded;
+    }
+
+    return $logicalLine;
 }
 
 /**
+ * @param list<string> $tokens
  * @return array{executable: string, operation: string}|null
  */
-function parseInvocation(string $segment): ?array
+function parseInvocation(array $tokens): ?array
 {
-    $tokens = commandTokens($segment);
-
     while ($tokens !== []) {
         $token = $tokens[0];
 
@@ -276,8 +536,70 @@ function parseInvocation(string $segment): ?array
             continue;
         }
 
+        if ($token === 'command') {
+            array_shift($tokens);
+
+            if ($tokens !== [] && in_array($tokens[0], ['-v', '-V'], true)) {
+                return null;
+            }
+
+            while ($tokens !== [] && in_array($tokens[0], ['-p', '--'], true)) {
+                $option = array_shift($tokens);
+
+                if ($option === '--') {
+                    break;
+                }
+            }
+
+            if ($tokens !== [] && str_starts_with($tokens[0], '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            continue;
+        }
+
         if ($token === 'env') {
             array_shift($tokens);
+
+            while ($tokens !== []) {
+                $option = $tokens[0];
+
+                if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $option) === 1 || in_array($option, ['-i', '--ignore-environment'], true)) {
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if ($option === '-u') {
+                    array_shift($tokens);
+
+                    if ($tokens === []) {
+                        return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                    }
+
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if (str_starts_with($option, '--unset=') && strlen($option) > strlen('--unset=')) {
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if ($option === '--') {
+                    array_shift($tokens);
+
+                    break;
+                }
+
+                if (str_starts_with($option, '-')) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                break;
+            }
 
             continue;
         }
@@ -285,8 +607,48 @@ function parseInvocation(string $segment): ?array
         if ($token === 'sudo') {
             array_shift($tokens);
 
-            while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
-                array_shift($tokens);
+            while ($tokens !== []) {
+                $option = $tokens[0];
+
+                if (in_array($option, ['-v', '-V', '-l', '--list'], true)) {
+                    return null;
+                }
+
+                if (in_array($option, ['-n', '--non-interactive', '-E', '--preserve-env', '-H', '--set-home'], true)) {
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if (in_array($option, ['-u', '--user', '-g', '--group', '-h', '--host'], true)) {
+                    array_shift($tokens);
+
+                    if ($tokens === []) {
+                        return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                    }
+
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if (preg_match('/^--(?:user|group|host|preserve-env)=.+$/', $option) === 1) {
+                    array_shift($tokens);
+
+                    continue;
+                }
+
+                if ($option === '--') {
+                    array_shift($tokens);
+
+                    break;
+                }
+
+                if (str_starts_with($option, '-')) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                break;
             }
 
             continue;
@@ -303,8 +665,52 @@ function parseInvocation(string $segment): ?array
     $basename = strtolower(basename($executable));
 
     if (preg_match('/^php(?:[0-9.]+)?$/', $basename) === 1) {
-        while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
-            array_shift($tokens);
+        while ($tokens !== []) {
+            $option = $tokens[0];
+
+            if (in_array($option, ['-l', '--syntax-check', '-r', '--run', '-i', '--info', '-v', '--version', '-m', '--modules', '--ini'], true)) {
+                return null;
+            }
+
+            if ($option === '--') {
+                array_shift($tokens);
+
+                break;
+            }
+
+            if (in_array($option, ['-n', '-q', '-s', '-w'], true)) {
+                array_shift($tokens);
+
+                continue;
+            }
+
+            if (in_array($option, ['-c', '-d', '-z', '-f'], true)) {
+                array_shift($tokens);
+
+                if ($tokens === []) {
+                    return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+                }
+
+                if ($option === '-f') {
+                    break;
+                }
+
+                array_shift($tokens);
+
+                continue;
+            }
+
+            if (preg_match('/^-(?:c|d|z).+$/', $option) === 1) {
+                array_shift($tokens);
+
+                continue;
+            }
+
+            if (str_starts_with($option, '-')) {
+                return ['executable' => 'unsupported-wrapper', 'operation' => 'unknown'];
+            }
+
+            break;
         }
 
         if ($tokens === []) {
@@ -324,7 +730,11 @@ function parseInvocation(string $segment): ?array
     }
 
     while ($tokens !== [] && str_starts_with($tokens[0], '-')) {
-        array_shift($tokens);
+        $option = array_shift($tokens);
+
+        if (in_array($option, ['--working-dir', '-d'], true) && $tokens !== []) {
+            array_shift($tokens);
+        }
     }
 
     $operation = strtolower((string) ($tokens[0] ?? ''));
@@ -380,9 +790,25 @@ function auditRoutes(string $repositoryRoot): array
         $contents = file_get_contents($repositoryRoot.'/'.$path);
         assertTrue($contents !== false, "Could not inspect tracked file {$path} for the route audit.");
 
+        $trimmedContents = ltrim($contents);
+
+        if (
+            str_contains($contents, "\0")
+            || str_starts_with($trimmedContents, '<?php')
+            || str_starts_with($trimmedContents, '#!/usr/bin/env php')
+        ) {
+            continue;
+        }
+
         foreach (normalizedLogicalLines($contents) as $logicalLine) {
-            foreach (commandChainSegments($logicalLine['text']) as $chainIndex => $segment) {
-                $invocation = parseInvocation($segment);
+            $shellLine = unquoteYamlCommandScalar($logicalLine['text']);
+
+            foreach (commandChainSegments($shellLine, false) as $chainIndex => $segment) {
+                if (! isPotentialInvocationSegment($segment)) {
+                    continue;
+                }
+
+                $invocation = parseInvocation(commandTokens($segment));
 
                 if ($invocation === null) {
                     continue;
@@ -668,6 +1094,13 @@ try {
         [implode(' ', ['CI=1', 'command', '--', 'composer', 'remove', 'vendor/package']), 0, 'composer', 'remove'],
         [implode(' ', ['php', '/tmp/'.'composer.phar', 'install']), 0, 'composer.phar', 'install'],
         [implode(' ', ['sudo', '-n', 'composer', 'update']), 0, 'composer', 'update'],
+        ['"'.'composer'.'" install', 0, 'composer', 'install'],
+        ['com'.'\\'.'poser install', 0, 'composer', 'install'],
+        ['CI='.'"two words"'.' '.'composer'.' install', 0, 'composer', 'install'],
+        ['com'.'"pos"'.'er install', 0, 'composer', 'install'],
+        ['"'.'composer install'.'"', 0, 'composer', 'install'],
+        ["'".'composer install'."'", 0, 'composer', 'install'],
+        ['"'.'env -i composer update'.'"', 0, 'composer', 'update'],
         [$guarded.' || '.'composer'.' install', 1, 'composer', 'install'],
         [$guarded.'; '.'composer'.' install', 1, 'composer', 'install'],
         [$guarded.' | '.'composer'.' install', 1, 'composer', 'install'],
