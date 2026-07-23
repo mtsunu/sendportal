@@ -821,6 +821,7 @@ function workflowCommandScalars(string $contents): array
 {
     $lines = preg_split('/\R/', $contents);
     $commands = [];
+    $anchors = [];
 
     for ($index = 0, $count = count($lines); $index < $count; ++$index) {
         $line = $lines[$index];
@@ -832,6 +833,28 @@ function workflowCommandScalars(string $contents): array
         $lineNumber = $index + 1;
         $indent = strlen($matches[1]);
         $value = rtrim($matches[2]);
+
+        if (preg_match('/^\*([A-Za-z_][A-Za-z0-9_-]*)$/', $value, $alias) === 1) {
+            $anchor = $anchors[$alias[1]] ?? null;
+
+            $commands[] = $anchor === null
+                ? [
+                    'line' => $lineNumber,
+                    'logical' => trim($line),
+                    'text' => $value,
+                    'scalar' => 'alias',
+                    'parse_error' => 'workflow run alias has no earlier bounded literal run-scalar anchor',
+                ]
+                : [
+                    'line' => $lineNumber,
+                    'logical' => trim($line).' => '.$anchor['logical'],
+                    'text' => $anchor['text'],
+                    'scalar' => 'alias('.$alias[1].')',
+                    'parse_error' => null,
+                ];
+
+            continue;
+        }
 
         if (preg_match('/^([>|])([+-]?)$/', $value, $block) === 1) {
             $parts = [];
@@ -900,6 +923,13 @@ function workflowCommandScalars(string $contents): array
         }
 
         $scalar = 'inline';
+        $anchorName = null;
+
+        if (preg_match('/^&([A-Za-z_][A-Za-z0-9_-]*)\s+(.+)$/', $value, $anchor) === 1) {
+            $anchorName = $anchor[1];
+            $value = $anchor[2];
+            $scalar = 'anchor';
+        }
 
         if (($value[0] ?? null) === "'" && str_ends_with($value, "'")) {
             $value = str_replace("''", "'", substr($value, 1, -1));
@@ -923,13 +953,23 @@ function workflowCommandScalars(string $contents): array
             $scalar = 'double-quoted';
         }
 
-        $commands[] = [
+        $command = [
             'line' => $lineNumber,
             'logical' => trim($line),
             'text' => $value,
             'scalar' => $scalar,
             'parse_error' => null,
         ];
+
+        if ($anchorName !== null && isset($anchors[$anchorName])) {
+            $command['parse_error'] = 'workflow run scalar anchor is duplicated';
+        }
+
+        $commands[] = $command;
+
+        if ($anchorName !== null && $command['parse_error'] === null) {
+            $anchors[$anchorName] = $command;
+        }
     }
 
     return $commands;
@@ -1561,32 +1601,186 @@ function shellRouteRecord(string $path, int $line, string $logical, string $scal
     ];
 }
 
+function routeAuditMarker(string $source): bool
+{
+    try {
+        $marker = containsComposerExecutableText($source);
+    } catch (RuntimeException) {
+        $marker = preg_match('~(?:composer(?:\.phar)?|bin/composer-policy|\b(?:bash|sh|zsh|eval)\b)~i', $source) === 1;
+    }
+
+    return $marker
+        || preg_match('~\b(?:bash|sh|zsh|eval)\b~i', $source) === 1
+        || preg_match('~\b(?:proc_open|exec|system|passthru|shell_exec)\s*\(~i', $source) === 1;
+}
+
+function routeSourceKind(string $path, string $contents): string
+{
+    $trimmed = ltrim($contents);
+
+    if ($path === 'AGENTS.md' || preg_match('~\.(?:phar|sha256|json|lock)$~i', $path) === 1) {
+        return 'non-source';
+    }
+
+    if (preg_match('~^\.github/workflows/.+\.ya?ml$~', $path) === 1) {
+        return 'workflow';
+    }
+
+    if (str_ends_with(strtolower($path), '.php') || str_starts_with($trimmed, '<?php') || str_starts_with($trimmed, '#!/usr/bin/env php')) {
+        return 'php';
+    }
+
+    if ($path === 'Makefile' || $path === 'README.md' || str_starts_with($path, 'scripts/') || str_starts_with($path, 'bin/') || preg_match('~\.(?:sh|bash|zsh)$~', $path) === 1) {
+        return 'shell';
+    }
+
+    if (preg_match('~(?:^|/)Dockerfile[^/]*$~i', $path) === 1 || str_starts_with($path, 'docker/') || str_starts_with($path, 'containers/')) {
+        return 'docker';
+    }
+
+    return 'unknown-source';
+}
+
+function markerSourceLine(string $contents): int
+{
+    if (preg_match('~^.*(?:composer(?:\.phar)?|bin/composer-policy|\b(?:bash|sh|zsh|eval|proc_open|exec|system|passthru|shell_exec)\b).*?$~im', $contents, $match, PREG_OFFSET_CAPTURE) !== 1) {
+        return 1;
+    }
+
+    return substr_count(substr($contents, 0, $match[0][1]), "\n") + 1;
+}
+
+/**
+ * @param list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}> $records
+ * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
+ */
+function finalizeRouteCandidate(array $records, string $path, int $line, string $logical, string $scalar, int $chain, string $segment, string $sourceKind, string $rationale): array
+{
+    if ($records !== [] || str_starts_with(trim($segment), '#!') || str_starts_with(trim($segment), '```') || ! routeAuditMarker($segment)) {
+        return $records;
+    }
+
+    return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-'.$sourceKind, 'unknown', 'unclassified', $rationale)];
+}
+
 /**
  * @param list<array{value: string, raw: string, fragments: list<array{quote: string, text: string, escaped: bool}>, dynamic: bool}> $details
  * @return array{program: string, raw: string, dynamic: bool, invalid: bool}|null
  */
 function inlinePhpProgram(array $details): ?array
 {
-    $values = array_column($details, 'value');
+    $cursor = 0;
+    $count = count($details);
 
-    if (preg_match('/^php(?:[0-9.]+)?$/', strtolower(basename((string) ($values[0] ?? '')))) !== 1) {
+    while ($cursor < $count) {
+        $value = $details[$cursor]['value'];
+
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $value) === 1) {
+            ++$cursor;
+
+            continue;
+        }
+
+        if ($value === 'env') {
+            ++$cursor;
+
+            while ($cursor < $count && (preg_match('/^[A-Za-z_][A-Za-z0-9_]*=/', $details[$cursor]['value']) === 1 || in_array($details[$cursor]['value'], ['-i', '--ignore-environment'], true))) {
+                ++$cursor;
+            }
+
+            continue;
+        }
+
+        if ($value === 'command') {
+            ++$cursor;
+
+            while ($cursor < $count && in_array($details[$cursor]['value'], ['-p', '--'], true)) {
+                ++$cursor;
+            }
+
+            continue;
+        }
+
+        if ($value === 'sudo') {
+            ++$cursor;
+
+            while ($cursor < $count && in_array($details[$cursor]['value'], ['-n', '--non-interactive', '-E', '--preserve-env', '-H', '--set-home'], true)) {
+                ++$cursor;
+            }
+
+            continue;
+        }
+
+        if ($value === 'timeout') {
+            ++$cursor;
+
+            while ($cursor < $count && str_starts_with($details[$cursor]['value'], '-')) {
+                ++$cursor;
+            }
+
+            if ($cursor < $count && preg_match('/^[0-9]+(?:\.[0-9]+)?[smhd]?$/', $details[$cursor]['value']) === 1) {
+                ++$cursor;
+
+                continue;
+            }
+
+            return ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true];
+        }
+
+        break;
+    }
+
+    if (preg_match('/^php(?:[0-9.]+)?$/', strtolower(basename((string) ($details[$cursor]['value'] ?? '')))) !== 1) {
         return null;
     }
 
-    if (! in_array($values[1] ?? null, ['-r', '--run'], true)) {
-        return null;
+    ++$cursor;
+
+    while ($cursor < $count) {
+        $option = $details[$cursor]['value'];
+
+        if (in_array($option, ['-n'], true)) {
+            ++$cursor;
+
+            continue;
+        }
+
+        if (in_array($option, ['-d', '-c', '-z'], true)) {
+            $cursor += 2;
+
+            continue;
+        }
+
+        if (preg_match('/^-d.+$/', $option) === 1) {
+            ++$cursor;
+
+            continue;
+        }
+
+        break;
     }
 
-    if (count($details) !== 3) {
-        return ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true];
+    if (! in_array($details[$cursor]['value'] ?? null, ['-r', '--run'], true)) {
+        $hasRunBoundary = (bool) array_filter(array_slice(array_column($details, 'value'), $cursor), static fn (string $value): bool => in_array($value, ['-r', '--run'], true));
+
+        if (! $hasRunBoundary) {
+            return null;
+        }
+
+        return routeAuditMarker(implode(' ', array_column($details, 'value')))
+            ? ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true]
+            : null;
     }
 
-    return [
-        'program' => $details[2]['value'],
-        'raw' => $details[2]['raw'],
-        'dynamic' => $details[2]['dynamic'],
-        'invalid' => false,
-    ];
+    if (! isset($details[$cursor + 1]) || $cursor + 2 !== $count) {
+        return routeAuditMarker(implode(' ', array_column($details, 'value')))
+            ? ['program' => '', 'raw' => implode(' ', array_column($details, 'raw')), 'dynamic' => true, 'invalid' => true]
+            : null;
+    }
+
+    $program = $details[$cursor + 1];
+
+    return ['program' => $program['value'], 'raw' => $program['raw'], 'dynamic' => $program['dynamic'], 'invalid' => false];
 }
 
 /**
@@ -1630,7 +1824,7 @@ function classifyInlinePhpRouteSegment(string $path, int $line, string $logical,
 
     foreach ($launches as $launch) {
         if ($launch['tokens'] === null) {
-            if ($launch['composer_bearing']) {
+            if ($launch['composer_bearing'] || $programBearing) {
                 $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'Composer-bearing php -r process launch is dynamic or outside the bounded literal grammar', $depth, $nextTrail, $program['raw'], $program['program']);
             }
 
@@ -1656,7 +1850,7 @@ function classifyInlinePhpRouteSegment(string $path, int $line, string $logical,
         $invocation = parseInvocation($launch['tokens']);
 
         if ($invocation === null) {
-            if ($launch['composer_bearing']) {
+            if ($launch['composer_bearing'] || $programBearing) {
                 $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'Composer-bearing php -r process launch could not be classified', $depth, $nextTrail, $program['raw'], $program['program']);
             }
 
@@ -1665,6 +1859,10 @@ function classifyInlinePhpRouteSegment(string $path, int $line, string $logical,
 
         $route = classifyRoute($path, $invocation['executable'], $invocation['contract_allowed']);
         $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale'], $depth, $nextTrail, $program['raw'], $program['program']);
+    }
+
+    if ($programBearing && $records === []) {
+        $records[] = shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-php', 'unknown', 'unclassified', 'marker-bearing php -r program produced no bounded process-launch record', $depth, $nextTrail, $program['raw'], $program['program']);
     }
 
     return $records;
@@ -1847,12 +2045,28 @@ function auditRoutes(string $repositoryRoot): array
         $contents = file_get_contents($repositoryRoot.'/'.$path);
         assertTrue($contents !== false, "Could not inspect tracked file {$path} for the route audit.");
 
+        $sourceKind = routeSourceKind($path, $contents);
+
+        if ($sourceKind === 'non-source') {
+            continue;
+        }
+
+        if ($sourceKind === 'unknown-source') {
+            if (routeAuditMarker($contents)) {
+                $line = markerSourceLine($contents);
+                $sourceLine = explode("\n", $contents)[$line - 1] ?? $contents;
+                $records[] = shellRouteRecord($path, $line, $sourceLine, 'unknown-source', 0, $sourceLine, 'unclassified-unknown-source', 'unknown', 'unclassified', 'marker-bearing tracked source has no approved provenance extractor');
+            }
+
+            continue;
+        }
+
         $trimmedContents = ltrim($contents);
         $isPhp = str_ends_with(strtolower($path), '.php')
             || str_starts_with($trimmedContents, '<?php')
             || str_starts_with($trimmedContents, '#!/usr/bin/env php');
 
-        if (str_contains($contents, "\0")) {
+        if (str_contains($contents, "\0") && ! routeAuditMarker($contents)) {
             continue;
         }
 
@@ -1861,9 +2075,14 @@ function auditRoutes(string $repositoryRoot): array
                 continue;
             }
 
-            foreach (phpProcessLaunches($contents) as $chainIndex => $launch) {
+            $programBearing = routeAuditMarker($contents);
+            $phpRecordStart = count($records);
+
+            $phpLaunches = phpProcessLaunches($contents);
+
+            foreach ($phpLaunches as $chainIndex => $launch) {
                 if ($launch['tokens'] === null) {
-                    if (! $launch['composer_bearing']) {
+                    if (! $launch['composer_bearing'] && ! $programBearing) {
                         continue;
                     }
 
@@ -1886,7 +2105,7 @@ function auditRoutes(string $repositoryRoot): array
                 $invocation = parseInvocation($launch['tokens']);
 
                 if ($invocation === null) {
-                    if ($launch['composer_bearing']) {
+                    if ($launch['composer_bearing'] || $programBearing) {
                         $records[] = [
                             'path' => $path,
                             'line' => $launch['line'],
@@ -1919,6 +2138,12 @@ function auditRoutes(string $repositoryRoot): array
                 ];
             }
 
+            if ($programBearing && $phpLaunches !== [] && count($records) === $phpRecordStart) {
+                $line = markerSourceLine($contents);
+                $sourceLine = explode("\n", $contents)[$line - 1] ?? $contents;
+                $records[] = shellRouteRecord($path, $line, $sourceLine, 'php-program', 0, $sourceLine, 'unclassified-php', 'unknown', 'unclassified', 'marker-bearing PHP program produced no bounded process-launch record');
+            }
+
             continue;
         }
 
@@ -1937,8 +2162,9 @@ function auditRoutes(string $repositoryRoot): array
             );
 
         foreach ($commands as $command) {
+            $commandRecordStart = count($records);
             if ($command['parse_error'] !== null) {
-                if (containsComposerExecutableText($command['text'])) {
+                if (routeAuditMarker($command['text']) || routeAuditMarker($command['logical'])) {
                     $records[] = [
                         'path' => $path,
                         'line' => $command['line'],
@@ -1983,7 +2209,7 @@ function auditRoutes(string $repositoryRoot): array
                     continue;
                 }
 
-                if (containsComposerExecutableText($command['text'])) {
+                if (routeAuditMarker($command['text'])) {
                     $records[] = [
                         'path' => $path,
                         'line' => $command['line'],
@@ -2014,6 +2240,19 @@ function auditRoutes(string $repositoryRoot): array
                     $evaluatorState,
                 )];
             }
+
+            $candidateRecords = array_slice($records, $commandRecordStart);
+            $records = [...array_slice($records, 0, $commandRecordStart), ...finalizeRouteCandidate(
+                $candidateRecords,
+                $path,
+                $command['line'],
+                $command['logical'],
+                $command['scalar'],
+                0,
+                $command['text'],
+                $sourceKind,
+                'marker-bearing source candidate could not be reduced by the bounded grammar',
+            )];
         }
     }
 
@@ -2585,7 +2824,7 @@ PHP;
     }
 
     $anchoredWorkflowRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
-        '.github/workflows/anchored-routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: &guarded php -n -r 'exec(\\\"php bin/composer-policy install\\\");'\n      - run: *guarded\n      - run: &direct php -n -r 'system(\\\"composer install\\\");'\n      - run: *direct\n",
+        '.github/workflows/anchored-routes.yml' => "jobs:\n  audit:\n    steps:\n      - run: &guarded php -n -r 'exec(\"php bin/composer-policy install\");'\n      - run: *guarded\n      - run: &direct php -n -r 'system(\"composer install\");'\n      - run: *direct\n",
     ]);
 
     try {
