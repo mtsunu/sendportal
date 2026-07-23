@@ -39,6 +39,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+      - name: Verify Composer policy routes
+        run: |
+          php tests/Composer/ComposerPolicyGuardTest.php
+          php tests/Composer/ComposerPolicyGuardTest.php --route-audit
       - name: Install composer dependencies
         run: php bin/composer-policy install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
       - name: Run Testsuite against MySQL

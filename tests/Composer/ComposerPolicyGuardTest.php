@@ -13,6 +13,8 @@ const MAX_ROUTE_SEGMENTS = 64;
 const MAX_ROUTE_TOKENS = 256;
 const MAX_ROUTE_EVALUATOR_DEPTH = 4;
 const MAX_ROUTE_EVALUATOR_PAYLOADS = 32;
+const MAX_ROUTE_COMPOUND_DEPTH = 4;
+const MAX_ROUTE_COMPOUND_BODIES = 32;
 
 require_once dirname(__DIR__, 2).'/tools/composer/ComposerPolicyCommandContract.php';
 
@@ -471,6 +473,8 @@ function commandChainSegments(string $logicalLine, bool $strict = true): array
     $buffer = '';
     $quote = null;
     $escaped = false;
+    $compoundDepth = 0;
+    $functionParenthesisDepth = 0;
     $length = strlen($logicalLine);
 
     for ($index = 0; $index < $length; ++$index) {
@@ -506,6 +510,45 @@ function commandChainSegments(string $logicalLine, bool $strict = true): array
 
         if ($quote === null && in_array($character, ["'", '"'], true)) {
             $quote = $character;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($quote === null && $character === '(' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', trim($buffer)) === 1) {
+            $buffer .= $character;
+            $functionParenthesisDepth = 1;
+
+            continue;
+        }
+
+        if ($quote === null && $functionParenthesisDepth > 0) {
+            $buffer .= $character;
+
+            if ($character === '(') {
+                ++$functionParenthesisDepth;
+            } elseif ($character === ')') {
+                --$functionParenthesisDepth;
+            }
+
+            continue;
+        }
+
+        if ($quote === null && $character === '{' && ($compoundDepth > 0 || trim($buffer) === '' || preg_match('/^[A-Za-z_][A-Za-z0-9_]*\(\)$/', trim($buffer)) === 1)) {
+            ++$compoundDepth;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($quote === null && $character === '}' && $compoundDepth > 0) {
+            --$compoundDepth;
+            $buffer .= $character;
+
+            continue;
+        }
+
+        if ($compoundDepth > 0) {
             $buffer .= $character;
 
             continue;
@@ -1256,6 +1299,92 @@ function containsComposerExecutableText(string $text): bool
     return false;
 }
 
+function containsComposerOrEvaluatorText(string $text): bool
+{
+    return containsComposerExecutableText($text)
+        || preg_match('~(?:composer(?:\\.phar)?|bin/composer-policy|\\b(?:bash|sh|zsh|eval)\\b)~i', $text) === 1;
+}
+
+/**
+ * @return array{kind: string, body: string, rationale: string}|null
+ */
+function compoundShellBody(string $segment): ?array
+{
+    $trimmed = trim($segment);
+    $open = null;
+    $kind = null;
+
+    if (str_starts_with($trimmed, '{')) {
+        $open = 0;
+        $kind = 'brace group';
+    } elseif (preg_match('/^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{/', $trimmed, $match) === 1) {
+        $open = strlen($match[0]) - 1;
+        $kind = 'function body';
+    } elseif (str_contains($trimmed, '{') && preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*\(/', $trimmed) === 1) {
+        return ['kind' => 'invalid', 'body' => '', 'rationale' => 'shell function shape is outside the bounded compound grammar'];
+    } else {
+        return null;
+    }
+
+    $quote = null;
+    $escaped = false;
+    $depth = 0;
+    $length = strlen($trimmed);
+
+    for ($index = $open; $index < $length; ++$index) {
+        $character = $trimmed[$index];
+
+        if ($escaped) {
+            $escaped = false;
+
+            continue;
+        }
+
+        if ($character === '\\' && $quote !== "'") {
+            $escaped = true;
+
+            continue;
+        }
+
+        if (in_array($character, ["'", '"'], true)) {
+            if ($quote === $character) {
+                $quote = null;
+            } elseif ($quote === null) {
+                $quote = $character;
+            }
+
+            continue;
+        }
+
+        if ($quote !== null) {
+            continue;
+        }
+
+        if ($character === '{') {
+            ++$depth;
+
+            continue;
+        }
+
+        if ($character === '}') {
+            --$depth;
+
+            if ($depth === 0) {
+                $body = trim(substr($trimmed, $open + 1, $index - $open - 1));
+                $remainder = trim(substr($trimmed, $index + 1));
+
+                if ($remainder !== '' || ! str_ends_with($body, ';')) {
+                    return ['kind' => 'invalid', 'body' => '', 'rationale' => "{$kind} must have one matching outer body ending in a command separator"];
+                }
+
+                return ['kind' => 'compound', 'body' => substr($body, 0, -1), 'rationale' => $kind];
+            }
+        }
+    }
+
+    return ['kind' => 'invalid', 'body' => '', 'rationale' => "{$kind} has an unmatched outer brace"];
+}
+
 function decodePhpStringLiteral(string $literal): ?string
 {
     $quote = $literal[0] ?? '';
@@ -1418,7 +1547,7 @@ function shellRouteRecord(string $path, int $line, string $logical, string $scal
 }
 
 /**
- * @param array{visited: int} $state
+ * @param array{visited: int, compounds: int} $state
  * @param list<string> $trail
  * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
  */
@@ -1426,6 +1555,48 @@ function classifyShellRouteSegment(string $path, int $line, string $logical, str
 {
     if (str_starts_with(trim($segment), '#!')) {
         return [];
+    }
+
+    $compound = compoundShellBody($segment);
+
+    if ($compound !== null) {
+        if ($compound['kind'] !== 'compound') {
+            if (containsComposerOrEvaluatorText($segment)) {
+                return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-compound', 'unknown', 'unclassified', $compound['rationale'], $depth, [...$trail, 'compound'])];
+            }
+
+            return [];
+        }
+
+        $nextTrail = [...$trail, $compound['rationale']];
+
+        if ($depth >= MAX_ROUTE_COMPOUND_DEPTH) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-compound', 'unknown', 'unclassified', 'Route audit compound nesting depth exceeds the configured bound', $depth, $nextTrail)];
+        }
+
+        ++$state['compounds'];
+
+        if ($state['compounds'] > MAX_ROUTE_COMPOUND_BODIES) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-compound', 'unknown', 'unclassified', 'Route audit compound body count exceeds the configured bound', $depth, $nextTrail)];
+        }
+
+        try {
+            $nestedSegments = commandChainSegments($compound['body']);
+        } catch (RuntimeException $exception) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-compound', 'unknown', 'unclassified', $exception->getMessage(), $depth, $nextTrail)];
+        }
+
+        if ($nestedSegments === []) {
+            return [shellRouteRecord($path, $line, $logical, $scalar, $chain, $segment, 'unclassified-compound', 'unknown', 'unclassified', 'Compound shell body has no bounded command segment', $depth, $nextTrail)];
+        }
+
+        $records = [];
+
+        foreach ($nestedSegments as $nestedSegment) {
+            $records = [...$records, ...classifyShellRouteSegment($path, $line, $logical, $scalar, $chain, $nestedSegment, $state, $depth + 1, $nextTrail)];
+        }
+
+        return $records;
     }
 
     try {
@@ -1672,7 +1843,7 @@ function auditRoutes(string $repositoryRoot): array
                 continue;
             }
 
-            $evaluatorState = ['visited' => 0];
+            $evaluatorState = ['visited' => 0, 'compounds' => 0];
 
             foreach ($segments as $chainIndex => $segment) {
                 $records = [...$records, ...classifyShellRouteSegment(
