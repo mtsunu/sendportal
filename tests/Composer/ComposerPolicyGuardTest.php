@@ -1424,7 +1424,8 @@ function classifyRoute(string $path, string $executable, bool $contractAllowed =
 
 function isSupportedProductionRoute(string $path): bool
 {
-    return $path === 'README.md'
+    return $path === 'composer.json'
+        || $path === 'README.md'
         || str_starts_with($path, '.github/workflows/')
         || str_starts_with($path, 'scripts/')
         || str_starts_with($path, 'bin/')
@@ -1794,6 +1795,126 @@ function markerSourceLine(string $contents): int
     }
 
     return substr_count(substr($contents, 0, $match[0][1]), "\n") + 1;
+}
+
+function composerScriptSourceLine(string $contents, string $event, string $handler): ?int
+{
+    $lines = explode("\n", $contents);
+    $eventNeedle = '"'.$event.'"';
+    $eventLine = null;
+    $limit = min(count($lines), MAX_ROUTE_SEGMENTS * MAX_ROUTE_TOKENS);
+
+    for ($index = 0; $index < $limit; ++$index) {
+        if ($eventLine === null) {
+            if (! str_contains($lines[$index], $eventNeedle)) {
+                continue;
+            }
+
+            $eventLine = $index;
+        }
+
+        if (str_contains($lines[$index], $handler)) {
+            return $index + 1;
+        }
+    }
+
+    return $eventLine === null ? null : $eventLine + 1;
+}
+
+function composerScriptMarker(string $source): bool
+{
+    return routeAuditMarker($source)
+        || preg_match('/(?:^|\s)@composer(?=\s|$)/i', $source) === 1
+        || preg_match('/\bcomposer(?:\.phar)?\b/i', $source) === 1
+        || str_contains(str_replace('\\', '/', $source), 'bin/composer-policy');
+}
+
+/**
+ * @return list<array{path: string, line: int, logical: string, scalar: string, chain: int, segment: string, executable: string, operation: string, classification: string, rationale: string, evaluator_depth: int, evaluator_trail: string, payload_raw: string, payload_decoded: string}>
+ */
+function composerScriptAuditRecords(string $contents): array
+{
+    try {
+        $manifest = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return composerScriptMarker($contents)
+            ? [shellRouteRecord('composer.json', markerSourceLine($contents), 'scripts', 'composer-script', 0, $contents, 'unclassified-composer-script', 'unknown', 'unclassified', 'root Composer manifest could not be parsed for bounded script provenance')]
+            : [];
+    }
+
+    if (! is_array($manifest) || ! array_key_exists('scripts', $manifest)) {
+        return [];
+    }
+
+    $scripts = $manifest['scripts'];
+
+    if (! is_array($scripts)) {
+        $raw = json_encode($scripts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+
+        return composerScriptMarker($raw)
+            ? [shellRouteRecord('composer.json', composerScriptSourceLine($contents, 'scripts', $raw) ?? markerSourceLine($contents), 'scripts', 'composer-script', 0, $raw, 'unclassified-composer-script', 'unknown', 'unclassified', 'root Composer scripts value is outside the finite handler grammar')]
+            : [];
+    }
+
+    $records = [];
+
+    foreach ($scripts as $event => $handlers) {
+        if (! is_string($event)) {
+            continue;
+        }
+
+        $finiteHandlers = is_string($handlers)
+            ? [$handlers]
+            : (is_array($handlers) && array_is_list($handlers) && array_reduce($handlers, static fn (bool $allStrings, mixed $handler): bool => $allStrings && is_string($handler), true)
+                ? $handlers
+                : null);
+
+        if ($finiteHandlers === null) {
+            $raw = json_encode($handlers, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+
+            if (composerScriptMarker($raw)) {
+                $records[] = shellRouteRecord('composer.json', composerScriptSourceLine($contents, $event, $raw) ?? markerSourceLine($contents), $event, 'composer-script', 0, $raw, 'unclassified-composer-script', 'unknown', 'unclassified', 'Composer script handler is outside the finite scalar-or-list-of-scalars grammar');
+            }
+
+            continue;
+        }
+
+        foreach ($finiteHandlers as $ordinal => $handler) {
+            if (! composerScriptMarker($handler)) {
+                continue;
+            }
+
+            $line = composerScriptSourceLine($contents, $event, $handler);
+
+            if ($line === null) {
+                $records[] = shellRouteRecord('composer.json', markerSourceLine($contents), $event, 'composer-script', $ordinal, $handler, 'unclassified-composer-script', 'unknown', 'unclassified', 'Composer script handler source line is outside the bounded locator');
+
+                continue;
+            }
+
+            $normalized = preg_replace('/^@composer(?=\s|$)/', 'composer', trim($handler));
+            $normalized = is_string($normalized) ? preg_replace('/^@php(?=\s|$)/', 'php', $normalized) : null;
+
+            try {
+                $tokens = $normalized === null ? [] : commandTokens($normalized);
+            } catch (RuntimeException) {
+                $tokens = [];
+            }
+
+            $invocation = $tokens === [] ? null : parseInvocation($tokens);
+
+            if ($invocation === null) {
+                $records[] = shellRouteRecord('composer.json', $line, $event, 'composer-script', $ordinal, $handler, 'unclassified-composer-script', 'unknown', 'unclassified', 'Composer script handler is outside the bounded executable and argument grammar');
+
+                continue;
+            }
+
+            $route = classifyRoute('composer.json', $invocation['executable'], $invocation['contract_allowed'] ?? false);
+            $records[] = shellRouteRecord('composer.json', $line, $event, 'composer-script', $ordinal, $handler, $invocation['executable'], $invocation['operation'], $route['classification'], $route['rationale']);
+        }
+    }
+
+    return $records;
 }
 
 /**
@@ -2251,6 +2372,12 @@ function auditRoutes(string $repositoryRoot): array
 
         $contents = file_get_contents($repositoryRoot.'/'.$path);
         assertTrue($contents !== false, "Could not inspect tracked file {$path} for the route audit.");
+
+        if ($path === 'composer.json') {
+            $records = [...$records, ...composerScriptAuditRecords($contents)];
+
+            continue;
+        }
 
         $sourceKind = routeSourceKind($path, $contents);
 
