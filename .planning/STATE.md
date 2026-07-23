@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: constraint-resolution-and-security-control
 status: executing
-stopped_at: Verification gaps after 01-10-PLAN.md
-last_updated: "2026-07-23T14:37:25.322Z"
+stopped_at: Completed 01-12-PLAN.md
+last_updated: "2026-07-23T16:26:00.000Z"
 last_activity: 2026-07-23
-last_activity_desc: Phase 01 Composer-script and indirect-PHP audit gaps verified after Plan 01-10
+last_activity_desc: Plan 01-12 Task 2 completed after tracer confirmation
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 12
+  completed_plans: 12
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-07-22)
 ## Current Position
 
 Phase: 01 (constraint-resolution-and-security-control) — EXECUTING
-Plan: 10 of 10
-Status: Verification gaps found
-Last activity: 2026-07-23 — Phase 01 Composer-script and indirect-PHP audit gaps verified after Plan 01-10
+Plan: 12 of 12
+Status: All Phase 01 plans complete; Phase 01 verification pending re-run
+Last activity: 2026-07-23 — Plan 01-12 Task 2 completed after tracer confirmation
 
 Progress: [██████████] 100%
 
@@ -62,6 +62,7 @@ Progress: [██████████] 100%
 | Phase 01-constraint-resolution-and-security-control P03 | 21m | 2 tasks | 2 files |
 | Phase 01 P04 | 9min | 2 tasks | 5 files |
 | Phase 01 P07 | 1h 42m | 3 tasks | 4 files |
+| Phase 01 P12 | 2h 34m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase ?]: Replace caller COMPOSER_HOME with a private mode-0700 home and preserve credentials only through COMPOSER_AUTH.
 - [Phase ?]: Use bounded concurrent capture only for preflight probes and direct matching descriptors for delegated Composer I/O.
 - [Phase ?]: Fail closed per supported route segment when bounded workflow, shell, or PHP parsing cannot classify Composer-bearing execution text.
+- [Phase ?]: Decide PHP program-bearing status solely from one token_get_all()-based command-shaped helper; no raw whole-source Composer regex and no production-route allowlist in tracked-PHP finalization.
 
 ### Pending Todos
 
@@ -102,6 +104,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-23T07:05:33.700Z
-Stopped at: Completed 01-07-PLAN.md
+Last session: 2026-07-23T16:26:00.000Z
+Stopped at: Completed 01-12-PLAN.md (Task 2 resumed from the human-verify checkpoint; Task 1 commits 0ce75e5 and 95cf1cb preserved)
 Resume file: None
