@@ -157,6 +157,15 @@ function assertNoComposerRan(string $trustedMarker, string $shadowMarker, string
     assertTrue(! file_exists($shadowMarker), "{$message}: PATH shadow ran.");
 }
 
+function assertOnlyVersionProbeRan(string $trustedMarker, string $shadowMarker, string $message): void
+{
+    assertTrue(! file_exists($shadowMarker), "{$message}: PATH shadow ran.");
+    $invocations = array_filter(explode("\n", (string) file_get_contents($trustedMarker)));
+    assertTrue(count($invocations) === 1, "{$message}: only the version probe may run.");
+    $probe = json_decode((string) reset($invocations), true, 512, JSON_THROW_ON_ERROR);
+    assertTrue($probe['arguments'] === ['--version', '--no-interaction'], "{$message}: policy help and delegation must not run.");
+}
+
 function assertGuardStructure(string $guard): void
 {
     foreach ([
@@ -218,8 +227,8 @@ try {
         'malformed record' => static function (string $root): void {
             writeFile($root.'/tools/composer/composer-2.10.2.phar.sha256', "not a provenance record\n");
         },
-        'wrong version' => static function (string $root): void {
-            writeSyntheticDistribution($root, '2.10.3');
+        'unreadable distribution' => static function (string $root): void {
+            chmod($root.'/tools/composer/composer-2.10.2.phar', 0000);
         },
     ] as $scenario => $mutate) {
         $root = createTemporaryRepository($repositoryRoot);
@@ -233,6 +242,16 @@ try {
         assertTrue($status !== 0, "The {$scenario} distribution must fail closed.");
         assertNoComposerRan($trustedMarker, $shadowMarker, "{$scenario} distribution");
     }
+
+    $wrongVersionRoot = createTemporaryRepository($repositoryRoot);
+    $temporaryRoots[] = $wrongVersionRoot;
+    $wrongVersionTrustedMarker = $wrongVersionRoot.'/trusted.marker';
+    $wrongVersionShadowMarker = $wrongVersionRoot.'/shadow.marker';
+    $wrongVersionEnvironment = assertionEnvironment($wrongVersionRoot, $wrongVersionShadowMarker, $wrongVersionTrustedMarker);
+    writeSyntheticDistribution($wrongVersionRoot, '2.10.3');
+    [$status] = runCommand([PHP_BINARY, $wrongVersionRoot.'/bin/composer-policy', 'install'], $wrongVersionEnvironment, $wrongVersionRoot);
+    assertTrue($status !== 0, 'A distribution reporting another Composer version must fail closed.');
+    assertOnlyVersionProbeRan($wrongVersionTrustedMarker, $wrongVersionShadowMarker, 'Wrong-version distribution');
 
     $overrideRoot = createTemporaryRepository($repositoryRoot);
     $temporaryRoots[] = $overrideRoot;

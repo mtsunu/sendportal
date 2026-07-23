@@ -3,7 +3,18 @@
 
 declare(strict_types=1);
 
-const MINIMUM_COMPOSER_VERSION = '2.10.0';
+const COMPOSER_RELEASE = '2.10.2';
+const COMPOSER_PHAR_NAME = 'composer-2.10.2.phar';
+const COMPOSER_RECORD_NAME = 'composer-2.10.2.phar.sha256';
+const COMPOSER_RELEASE_URL = 'https://getcomposer.org/download/2.10.2/composer.phar';
+const COMPOSER_CHECKSUM_URL = 'https://getcomposer.org/download/2.10.2/composer.phar.sha256sum';
+
+function reject(string $message): never
+{
+    fwrite(STDERR, "Composer policy guard: {$message}\n");
+
+    exit(1);
+}
 
 /**
  * @param list<string> $command
@@ -11,16 +22,10 @@ const MINIMUM_COMPOSER_VERSION = '2.10.0';
  */
 function runComposer(array $command): array
 {
-    $process = proc_open(
-        $command,
-        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-        $pipes,
-    );
+    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
 
     if (! is_resource($process)) {
-        fwrite(STDERR, "Could not start Composer through the current PHP interpreter.\n");
-
-        exit(1);
+        reject('Composer distribution unavailable.');
     }
 
     $output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
@@ -30,83 +35,102 @@ function runComposer(array $command): array
     return [proc_close($process), $output];
 }
 
-function reject(string $message): never
+function isReadableRegularFile(string $path): bool
 {
-    fwrite(STDERR, "Composer policy guard: {$message}\n");
+    $stat = @lstat($path);
 
-    exit(1);
+    return is_array($stat)
+        && (($stat['mode'] & 0170000) === 0100000)
+        && is_readable($path);
 }
 
-function resolveComposer(): string
+/**
+ * @return array{phar: string, record: string}
+ */
+function repositoryDistributionPaths(): array
 {
-    $path = getenv('PATH');
+    $scriptPath = realpath(__FILE__);
 
-    if (! is_string($path) || $path === '') {
-        reject('PATH does not contain a Composer executable required by this repository native policy.');
+    if ($scriptPath === false) {
+        reject('Composer distribution unavailable.');
     }
 
-    foreach (explode(PATH_SEPARATOR, $path) as $directory) {
-        $candidate = rtrim($directory === '' ? '.' : $directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'composer';
+    $repositoryRoot = realpath(dirname($scriptPath).'/..');
 
-        if (! is_file($candidate) || ! is_readable($candidate) || ! is_executable($candidate)) {
-            continue;
-        }
-
-        $resolved = realpath($candidate);
-
-        if ($resolved !== false && is_file($resolved) && is_readable($resolved)) {
-            return $resolved;
-        }
+    if ($repositoryRoot === false) {
+        reject('Composer distribution unavailable.');
     }
 
-    reject('PATH does not contain a readable Composer executable required by this repository native policy.');
+    return [
+        'phar' => $repositoryRoot.'/tools/composer/'.COMPOSER_PHAR_NAME,
+        'record' => $repositoryRoot.'/tools/composer/'.COMPOSER_RECORD_NAME,
+    ];
 }
 
-function rejectOverrides(array $arguments): void
+function verifiedComposerPath(): string
 {
-    $environmentOverrides = [
-        'COMPOSER_BIN',
-        'COMPOSER',
-        'COMPOSER_POLICY',
-        'COMPOSER_NO_AUDIT',
-        'COMPOSER_NO_BLOCKING',
-        'COMPOSER_NO_SECURITY_BLOCKING',
-        'COMPOSER_IGNORE_PLATFORM_REQ',
-        'COMPOSER_IGNORE_PLATFORM_REQS',
+    $paths = repositoryDistributionPaths();
+
+    if (! isReadableRegularFile($paths['phar']) || ! isReadableRegularFile($paths['record'])) {
+        reject('Composer distribution unavailable.');
+    }
+
+    $record = file($paths['record'], FILE_IGNORE_NEW_LINES);
+
+    if ($record === false || count($record) !== 4) {
+        reject('Composer distribution integrity verification failed.');
+    }
+
+    $expectedLines = [
+        'release: '.COMPOSER_RELEASE,
+        'source: '.COMPOSER_RELEASE_URL,
+        'verification: '.COMPOSER_CHECKSUM_URL,
     ];
 
-    foreach ($environmentOverrides as $name) {
+    foreach ($expectedLines as $index => $line) {
+        if (($record[$index] ?? null) !== $line) {
+            reject('Composer distribution integrity verification failed.');
+        }
+    }
+
+    if (preg_match('/^([a-f0-9]{64})\s+'.preg_quote(COMPOSER_PHAR_NAME, '/').'$/D', $record[3], $matches) !== 1) {
+        reject('Composer distribution integrity verification failed.');
+    }
+
+    $actualDigest = hash_file('sha256', $paths['phar']);
+
+    if (! is_string($actualDigest) || ! hash_equals($matches[1], $actualDigest)) {
+        reject('Composer distribution integrity verification failed.');
+    }
+
+    return $paths['phar'];
+}
+
+/**
+ * @param list<string> $arguments
+ */
+function rejectOverrides(array $arguments): void
+{
+    foreach (['COMPOSER_BIN', 'COMPOSER', 'COMPOSER_POLICY', 'COMPOSER_NO_AUDIT', 'COMPOSER_NO_BLOCKING', 'COMPOSER_NO_SECURITY_BLOCKING', 'COMPOSER_IGNORE_PLATFORM_REQ', 'COMPOSER_IGNORE_PLATFORM_REQS'] as $name) {
         $value = getenv($name);
 
         if (is_string($value) && $value !== '') {
-            reject("{$name} is not allowed because this repository native policy needs it disabled.");
+            reject('Composer override rejected.');
         }
     }
 
-    $optionPrefixes = [
-        '--ignore-platform-req',
-        '--ignore-platform-reqs',
-        '--no-audit',
-        '--no-blocking',
-        '--no-security-blocking',
-    ];
-
     foreach ($arguments as $argument) {
-        foreach ($optionPrefixes as $option) {
+        foreach (['--ignore-platform-req', '--ignore-platform-reqs', '--no-blocking', '--no-security-blocking', '--no-audit'] as $option) {
             if ($argument === $option || str_starts_with($argument, $option.'=')) {
-                reject("{$option} is not allowed because this repository native policy needs it enabled.");
+                reject('Composer override rejected.');
             }
         }
     }
 }
 
-function composerVersion(string $output): ?string
+function hasExactComposerVersion(string $output): bool
 {
-    if (preg_match('/Composer version\\s+([0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/i', $output, $matches) !== 1) {
-        return null;
-    }
-
-    return $matches[1];
+    return preg_match('/^Composer version '.preg_quote(COMPOSER_RELEASE, '/').'(?:\s|$)/mi', $output) === 1;
 }
 
 if (PHP_SAPI !== 'cli') {
@@ -120,19 +144,18 @@ if ($arguments === []) {
 }
 
 rejectOverrides($arguments);
-$composerPath = resolveComposer();
+$composerPath = verifiedComposerPath();
 
 [$versionStatus, $versionOutput] = runComposer([PHP_BINARY, $composerPath, '--version', '--no-interaction']);
-$version = $versionStatus === 0 ? composerVersion($versionOutput) : null;
 
-if ($version === null || version_compare($version, MINIMUM_COMPOSER_VERSION, '<')) {
-    reject('Composer >= 2.10.0 is required because this repository native policy needs it before dependency resolution.');
+if ($versionStatus !== 0 || ! hasExactComposerVersion($versionOutput)) {
+    reject('Composer distribution version verification failed.');
 }
 
 [$policyStatus] = runComposer([PHP_BINARY, $composerPath, 'policy', '--help', '--no-interaction']);
 
 if ($policyStatus !== 0) {
-    reject('Composer native policy capability is required because this repository native policy needs it before dependency resolution.');
+    reject('Composer distribution policy capability unavailable.');
 }
 
 [$exitStatus, $delegatedOutput] = runComposer([PHP_BINARY, $composerPath, ...$arguments]);

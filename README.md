@@ -32,7 +32,7 @@ SendPortal V3 requires:
 
 ### Dependency management
 
-Composer 2.10.0 or newer is required because this repository's committed native security policy is enforced by that Composer line. From this checkout, use the guarded command for both an operator install and intentional dependency-update work:
+The guarded commands use this checkout's tracked Composer 2.10.2 distribution, so they do not download Composer on each invocation. They fail closed if that distribution or its checked-in integrity record is missing or invalid. From this checkout, use the guarded command for both an operator install and intentional dependency-update work:
 
 ```sh
 php bin/composer-policy install --prefer-dist --no-interaction
