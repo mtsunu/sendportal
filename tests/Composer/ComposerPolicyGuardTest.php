@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+if (($argv[1] ?? null) === '--route-audit') {
+    fwrite(STDERR, "FAIL: Route audit is not implemented.\n");
+
+    exit(1);
+}
+
 /**
  * Dependency-free CLI regression coverage for bin/composer-policy.
  *
