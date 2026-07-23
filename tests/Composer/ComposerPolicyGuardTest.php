@@ -1748,6 +1748,120 @@ function shellRouteRecord(string $path, int $line, string $logical, string $scal
     ];
 }
 
+/**
+ * @return array{line: int, source: string}|null
+ */
+function phpCommandShapedProgram(string $contents): ?array
+{
+    $meaningful = [];
+
+    foreach (token_get_all($contents) as $token) {
+        if (is_array($token) && in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+            continue;
+        }
+
+        $meaningful[] = [
+            'type' => is_array($token) ? $token[0] : null,
+            'text' => is_array($token) ? $token[1] : $token,
+            'line' => is_array($token) ? $token[2] : 0,
+        ];
+    }
+
+    $lines = explode("\n", $contents);
+
+    foreach ($meaningful as $index => $token) {
+        if ($token['type'] !== T_CONSTANT_ENCAPSED_STRING) {
+            continue;
+        }
+
+        $command = decodePhpStringLiteral($token['text']);
+
+        if (! is_string($command) || ! phpCommandShapedLiteral($command)) {
+            continue;
+        }
+
+        $callLine = phpCommandInvocationLine($meaningful, $index);
+
+        if ($callLine === null) {
+            continue;
+        }
+
+        return [
+            'line' => $callLine,
+            'source' => $lines[$callLine - 1] ?? $command,
+        ];
+    }
+
+    return null;
+}
+
+function phpCommandShapedLiteral(string $command): bool
+{
+    return preg_match('~^(?:@composer|composer(?:\\.phar)?)\\s+(?:install|update|audit|validate)(?:\\s|$)~i', trim($command)) === 1
+        || preg_match('~^(?:php(?:[0-9.]+)?\\s+)?(?:\\.?/)?bin/composer-policy\\s+(?:install|update|audit|validate)(?:\\s|$)~i', trim($command)) === 1
+        || preg_match('~^(?:bash|sh|zsh|eval)\\s+(?:-c\\s+)?[\\\'\"]?(?:@composer|composer(?:\\.phar)?)\\s+(?:install|update|audit|validate)(?:\\s|$)~i', trim($command)) === 1;
+}
+
+/**
+ * @param list<array{type: int|null, text: string, line: int}> $tokens
+ */
+function phpCommandInvocationLine(array $tokens, int $stringIndex): ?int
+{
+    $previous = $tokens[$stringIndex - 1] ?? null;
+
+    if ($previous !== null && $previous['type'] === T_ECHO) {
+        return $previous['line'];
+    }
+
+    $depth = 0;
+
+    for ($index = $stringIndex - 1; $index >= 0; --$index) {
+        $token = $tokens[$index];
+
+        if (in_array($token['text'], [')', ']', '}'], true)) {
+            ++$depth;
+
+            continue;
+        }
+
+        if (in_array($token['text'], ['(', '[', '{'], true)) {
+            if ($depth > 0) {
+                --$depth;
+
+                continue;
+            }
+
+            if ($token['text'] !== '(') {
+                return null;
+            }
+
+            $callee = $tokens[$index - 1] ?? null;
+
+            if ($callee === null || ! in_array($callee['type'], [T_STRING, T_VARIABLE], true)) {
+                return null;
+            }
+
+            return $callee['line'];
+        }
+
+        if ($depth === 0 && $token['text'] === ';') {
+            return null;
+        }
+    }
+
+    return null;
+}
+
+function isTrustedPhpAuditSource(string $path): bool
+{
+    return $path === 'bin/composer-policy'
+        || str_starts_with($path, 'tests/')
+        || str_starts_with($path, '.planning/')
+        || str_starts_with($path, 'vendor/')
+        || str_starts_with($path, 'bootstrap/cache/')
+        || str_starts_with($path, 'storage/framework/');
+}
+
 function routeAuditMarker(string $source): bool
 {
     try {
@@ -2405,12 +2519,12 @@ function auditRoutes(string $repositoryRoot): array
         }
 
         if ($isPhp) {
-            if ($path === 'bin/composer-policy' || str_starts_with($path, 'tests/') || str_starts_with($path, '.planning/')) {
+            if (isTrustedPhpAuditSource($path)) {
                 continue;
             }
 
-            $programBearing = routeAuditMarker($contents)
-                || preg_match('~\bcomposer(?:\.phar)?\b|bin/composer-policy~i', $contents) === 1;
+            $program = phpCommandShapedProgram($contents);
+            $programBearing = $program !== null;
             $phpRecordStart = count($records);
 
             $phpLaunches = phpProcessLaunches($contents);
@@ -2473,10 +2587,8 @@ function auditRoutes(string $repositoryRoot): array
                 ];
             }
 
-            if ($programBearing && isSupportedProductionRoute($path) && count($records) === $phpRecordStart) {
-                $line = markerSourceLine($contents);
-                $sourceLine = explode("\n", $contents)[$line - 1] ?? $contents;
-                $records[] = shellRouteRecord($path, $line, $sourceLine, 'php-program', 0, $contents, 'unclassified-php', 'unknown', 'unclassified', 'marker-bearing PHP program produced no bounded process-launch record');
+            if ($program !== null && count($records) === $phpRecordStart) {
+                $records[] = shellRouteRecord($path, $program['line'], $program['source'], 'php-program', 0, $program['source'], 'unclassified-php', 'unknown', 'unclassified', 'command-shaped PHP program produced no bounded process-launch record');
             }
 
             continue;
