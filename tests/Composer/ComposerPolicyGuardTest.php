@@ -183,6 +183,33 @@ function assertGuardStructure(string $guard): void
     assertTrue(! str_contains($guard, 'resolveComposer'), 'Guard must not retain the PATH Composer resolver.');
 }
 
+function initializeFixtureRepository(string $sourceRoot, string $contents): string
+{
+    $fixtureRoot = sys_get_temp_dir().'/sendportal-composer-route-'.bin2hex(random_bytes(8));
+    writeFile($fixtureRoot.'/bin/composer-policy', (string) file_get_contents($sourceRoot.'/bin/composer-policy'));
+    writeFile($fixtureRoot.'/.github/workflows/routes.yml', $contents);
+    [$status, $output] = runCommand(['git', 'init', '--quiet'], getenv(), $fixtureRoot);
+    assertTrue($status === 0, "Could not initialize the route-audit fixture repository: {$output}");
+    [$status, $output] = runCommand(['git', 'add', 'bin/composer-policy', '.github/workflows/routes.yml'], getenv(), $fixtureRoot);
+    assertTrue($status === 0, "Could not stage the route-audit fixture repository: {$output}");
+
+    return $fixtureRoot;
+}
+
+function assertFixtureRouteFails(string $sourceRoot, string $command, int $chainIndex, string $form): void
+{
+    $fixtureRoot = initializeFixtureRepository($sourceRoot, 'run: '.$command."\n");
+
+    try {
+        $records = auditRoutes($fixtureRoot);
+        $failures = routeAuditFailures($records);
+        assertTrue($failures !== [], "Fixture {$form} must fail the route audit.");
+        assertTrue((bool) array_filter($records, static fn (array $record): bool => $record['chain'] === $chainIndex && $record['executable'] === $form && $record['classification'] === 'unsupported'), "Fixture {$form} must identify its direct chain segment.");
+    } finally {
+        removeDirectory($fixtureRoot);
+    }
+}
+
 $repositoryRoot = dirname(__DIR__, 2);
 $guard = $repositoryRoot.'/bin/composer-policy';
 $guardContents = file_get_contents($guard);
@@ -266,6 +293,17 @@ try {
         [$status, $output] = runCommand([PHP_BINARY, $overrideRoot.'/bin/composer-policy', 'install'], $environment, $overrideRoot);
         assertTrue($status !== 0 && str_contains($output, 'Composer override rejected'), "{$name} must be rejected before Composer starts.");
         assertNoComposerRan($overrideTrustedMarker, $overrideShadowMarker, "{$name} override");
+    }
+
+    $guarded = 'php bin/'.'composer-policy install';
+    foreach ([
+        ['composer'.' --no-interaction '.'install', 0, 'composer'],
+        ['/tmp/'.'composer.phar '.'install', 0, 'composer.phar'],
+        ['/opt/'.'composer '.'update', 0, 'composer'],
+        ['composer'.' install && '.$guarded, 0, 'composer'],
+        [$guarded.' && composer'.' install', 1, 'composer'],
+    ] as [$command, $chainIndex, $form]) {
+        assertFixtureRouteFails($repositoryRoot, $command, $chainIndex, $form);
     }
 } finally {
     foreach ($temporaryRoots as $temporaryRoot) {
