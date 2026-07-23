@@ -2509,6 +2509,52 @@ PHP;
         }
     }
 
+    $inlinePhpDirect = 'system("'.$compoundDirect.'");';
+    $inlinePhpGuarded = 'exec("'.$compoundGuarded.'");';
+    $inlinePhpEvaluator = 'system("bash -c \\\''.$compoundDirect.'\\\'");';
+
+    foreach ([
+        'inline PHP direct process launch' => [$inlinePhpDirect, 'composer', 'install', 'unsupported'],
+        'inline PHP guarded process launch' => [$inlinePhpGuarded, 'guard', 'install', 'supported'],
+        'inline PHP evaluator process launch' => [$inlinePhpEvaluator, 'composer', 'install', 'unsupported'],
+    ] as $scenario => [$program, $executable, $operation, $classification]) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: php -r '{$program}'\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $matching = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === $executable
+                && $record['operation'] === $operation
+                && $record['classification'] === $classification));
+            assertTrue($matching !== [], "Fixture {$scenario} must preserve inline-PHP {$classification} route evidence.");
+
+            if ($classification === 'unsupported') {
+                assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+            }
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
+    foreach ([
+        'dynamic inline PHP launch' => 'system("composer ".'.'$operation);',
+        'malformed inline PHP launch' => 'system("'.$compoundDirect.'";',
+        'inline PHP without bounded launch' => 'echo "'.$compoundDirect.'";',
+        'inline PHP launch count bound' => str_repeat('system("'.$compoundDirect.'");', MAX_ROUTE_EVALUATOR_PAYLOADS + 1),
+        'inline PHP program length bound' => 'system("'.$compoundDirect.'");'.str_repeat('x', MAX_ROUTE_LOGICAL_LINE_LENGTH),
+    ] as $scenario => $program) {
+        $fixtureRoot = initializeFixtureRepository($repositoryRoot, "jobs:\n  audit:\n    steps:\n      - run: php -r '{$program}'\n");
+
+        try {
+            $records = auditRoutes($fixtureRoot);
+            $unclassified = array_values(array_filter($records, static fn (array $record): bool => $record['executable'] === 'unclassified-php'
+                && $record['classification'] === 'unclassified'));
+            assertTrue($unclassified !== [], "Fixture {$scenario} must produce explicit inline-PHP unclassified evidence.");
+            assertTrue(routeAuditFailures($records) !== [], "Fixture {$scenario} must fail the route audit.");
+        } finally {
+            removeDirectory($fixtureRoot);
+        }
+    }
+
     $directInstall = 'composer'.' install';
     $directUpdate = 'composer'.' update';
     $guardedInstall = 'php bin/'.'composer-policy install';
