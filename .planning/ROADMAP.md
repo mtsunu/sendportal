@@ -14,7 +14,7 @@ This milestone establishes a secure PHP 8.4 installation contract for the existi
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Constraint Resolution and Security Control** - Establish an honest PHP 8.2–8.4 Composer contract and a compatible dependency-security safeguard. ✓ Verified passed 2026-07-24 (7/7 truths).
-- [ ] **Phase 2: Reproducible Dependency Snapshot** - Freeze the approved PHP 8.4 graph into a reviewed lockfile and make it the standard installation contract.
+- [x] **Phase 2: Reproducible Dependency Snapshot** - Freeze the approved PHP 8.4 graph into a reviewed lockfile and make it the standard installation contract. (completed 2026-07-24)
 - [ ] **Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification** - Prove the locked application boots and its existing test matrix continues to work under PHP 8.4.
 
 ## Phase Details
@@ -73,7 +73,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Lockstep advisory refresh (composer.json + guard, v11.55.0 RETAIN) + platform/audit review evidence + install-contract docs.
+- [x] 02-02-PLAN.md — Lockstep advisory refresh (composer.json + guard, v11.55.0 RETAIN) + platform/audit review evidence + install-contract docs.
 
 ### Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification
 
@@ -98,5 +98,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Constraint Resolution and Security Control | 7/7 | Complete | 2026-07-24 |
-| 2. Reproducible Dependency Snapshot | 1/2 | In Progress|  |
+| 2. Reproducible Dependency Snapshot | 2/2 | Complete   | 2026-07-24 |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/TBD | Not started | - |

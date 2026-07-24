@@ -14,9 +14,9 @@
 ### Dependency Security & Reproducibility
 
 - [x] **DEPS-01**: A reviewed `composer.lock` is committed and remains synchronized with `composer.json` under `composer validate --strict`.
-- [ ] **DEPS-02**: The locked graph passes `composer check-platform-reqs` on PHP 8.4.
-- [ ] **DEPS-03**: The locked graph passes a non-bypassed dependency security check (`composer audit --locked` or an equivalent configured Composer policy).
-- [ ] **DEPS-04**: Standard local, CI, and deployment installation paths use `composer install` against the committed lockfile rather than a fresh dependency resolution.
+- [x] **DEPS-02**: The locked graph passes `composer check-platform-reqs` on PHP 8.4.
+- [x] **DEPS-03**: The locked graph passes a non-bypassed dependency security check (`composer audit --locked` or an equivalent configured Composer policy).
+- [x] **DEPS-04**: Standard local, CI, and deployment installation paths use `composer install` against the committed lockfile rather than a fresh dependency resolution.
 
 ### Runtime Validation
 
@@ -55,9 +55,9 @@
 | COMP-02 | Phase 1 | Gaps Found |
 | COMP-03 | Phase 1 | Gaps Found |
 | DEPS-01 | Phase 2 | Complete |
-| DEPS-02 | Phase 2 | Pending |
-| DEPS-03 | Phase 2 | Pending |
-| DEPS-04 | Phase 2 | Pending |
+| DEPS-02 | Phase 2 | Complete |
+| DEPS-03 | Phase 2 | Complete |
+| DEPS-04 | Phase 2 | Complete |
 | RUNTIME-01 | Phase 3 | Pending |
 | RUNTIME-02 | Phase 3 | Pending |
 | RUNTIME-03 | Phase 3 | Pending |
