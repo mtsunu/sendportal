@@ -33,9 +33,9 @@
                 "block": true,
                 "audit": "fail",
                 "ignore-id": {
-                    "PKSA-3r5d-mb8f-1qw9": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first.",
-                    "PKSA-m5cs-t1y6-qpcs": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first.",
-                    "PKSA-mdq4-51ck-6kdq": "This internal-only application has residual risk accepted by the project owner. The exception expires at Phase 2 lockfile review or when a compatible stable SendPortal Core release permits a Laravel upgrade, whichever comes first."
+                    "PKSA-3r5d-mb8f-1qw9": "This internal-only application has residual risk on the locked laravel/framework v11.55.0 accepted by the project owner. The exception expires at the next dependency-upgrade review or when a stable mettle/sendportal-core release permits an upgraded Laravel line, whichever comes first.",
+                    "PKSA-m5cs-t1y6-qpcs": "This internal-only application has residual risk on the locked laravel/framework v11.55.0 accepted by the project owner. The exception expires at the next dependency-upgrade review or when a stable mettle/sendportal-core release permits an upgraded Laravel line, whichever comes first.",
+                    "PKSA-mdq4-51ck-6kdq": "This internal-only application has residual risk on the locked laravel/framework v11.55.0 accepted by the project owner. The exception expires at the next dependency-upgrade review or when a stable mettle/sendportal-core release permits an upgraded Laravel line, whichever comes first."
                 }
             }
         }
