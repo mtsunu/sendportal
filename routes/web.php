@@ -21,8 +21,8 @@ Route::get('setup', 'SetupController@index')->name('setup');
 // Auth.
 Route::middleware('auth')->namespace('Auth')->group(
     static function (Router $authRouter) {
-        // Logout.
-        $authRouter->get('logout', 'LoginController@logout')->name('logout');
+        // Logout is registered by Auth::routes() as POST /logout (name: logout);
+        // the header view submits it via POST, so no separate route is needed here.
 
         // Profile.
         $authRouter->middleware('verified')->name('profile.')->prefix('profile')->group(
