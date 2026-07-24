@@ -1,42 +1,20 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-verified: 2026-07-23T15:06:18Z
-status: gaps_found
-score: 6/7 must-haves verified
+verified: 2026-07-24T00:00:00Z
+status: passed
+score: 7/7 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
   previous_score: 6/7
   gaps_closed:
-    - "The Plan 09 exact PHP CLI wrapper and variable-fed system/exec paths now have bounded parser handling and passing staged regressions."
-    - "Plan 10's known shell, evaluator, workflow, Docker, literal PHP, and unknown-source fixture matrix reaches either the shared command contract or explicit unclassified evidence."
-  gaps_remaining:
-    - "Composer scripts are categorically excluded as JSON/non-source, so staged post-install-cmd direct Composer and @composer forms produce zero records and zero failures."
-    - "Supported scripts/*.php using call_user_func('system', ...), a variable function, or popen() produce zero records and zero failures."
-  regressions:
-    - "The claimed source-level marker-bearing no-record invariant does not cover composer.json script hooks or unmodeled PHP dispatch."
-gaps:
-  - truth: "All Composer-bearing execution surfaces are detected and either use the complete guard contract or fail closed."
-    status: failed
-    reason: "auditRoutes() classifies every .json file as non-source and immediately continues. A disposable staged composer.json with post-install-cmd entries for direct composer install, @composer update, and a guarded form produced records=[] and routeAuditFailures()=[]; Composer scripts are reachable during the documented script-enabled guarded install."
-    artifacts:
-      - path: "tests/Composer/ComposerPolicyGuardTest.php"
-        issue: "routeSourceKind() returns non-source for .json at lines 1767-1768, and auditRoutes() skips non-source files at lines 2257-2258; no Composer-script extractor or rejection path exists."
-    missing:
-      - "Add a finite composer.json scripts provenance extractor before the JSON/non-source exclusion."
-      - "Reject direct Composer and @composer script handlers with source-provenanced failures while preserving the current non-Composer Laravel scripts used by the documented script-enabled guarded install."
-      - "Add disposable staged fixtures for post-install-cmd direct Composer and @composer forms that require nonempty records and routeAuditFailures()."
-  - truth: "Every supported PHP process-dispatch form containing a Composer, guard, or evaluator marker is classified or fails closed with source evidence."
-    status: failed
-    reason: "The PHP extractor recognizes only proc_open, exec, system, passthru, and shell_exec. In disposable staged scripts/*.php routes, call_user_func('system', 'composer install'), $launch='system'; $launch('composer install'), and popen('composer install', 'r') each returned records=[] and routeAuditFailures()=[]."
-    artifacts:
-      - path: "tests/Composer/ComposerPolicyGuardTest.php"
-        issue: "phpProcessLaunches() hard-codes five direct APIs at lines 1665-1666; popen is not a marker API, and auditRoutes() only emits a PHP program fallback when phpProcessLaunches() is nonempty at lines 2348-2352."
-    missing:
-      - "Make any Composer/guard/evaluator-bearing PHP program with no bounded launch record emit one unclassified-php record."
-      - "Treat indirect/callable dispatch and unmodeled launch APIs (including call_user_func, variable functions, and popen) as source-provenanced unclassified evidence rather than modeling their data flow."
-      - "Add disposable staged regressions for all three forms that require nonempty records and routeAuditFailures()."
+    - "Tracked app/*.php and tools/*.php unmodeled dispatch now emits one source-provenanced unclassified-php record and fails the route audit. The PHP no-record fallback is no longer restricted to isSupportedProductionRoute(); it is gated by phpCommandShapedProgram() over token_get_all() with explicit guard/test/planning/vendor/generated exclusions."
+    - "The exact regression probe from the previous report — a disposable clone with staged app/IndirectComposer.php (variable-function system) and tools/IndirectComposer.php (popen) — now makes --route-audit exit 1 with both staged paths recorded, alongside the unchanged three guarded CI/README records."
+  gaps_remaining: []
+  accepted_bounds:
+    - "Concat-via-indirection ($r(\"composer\".\" install\")) escapes the source-level fallback uniformly across app/, scripts/, and tools/ because phpCommandShapedProgram() matches a single T_CONSTANT_ENCAPSED_STRING and does not interpret string concatenation. This is NOT the path-based blind spot the previous report blocked on (that is retired) — it is a uniform property of the literal-only helper, consistent with the plan's own accepted threat T-01-12-03 (no data-flow / no PHP evaluation). Truth #5 is scoped accordingly below. Owner-accepted this cycle."
+gaps: []
 deferred:
   - truth: "The three temporary advisory exceptions are removed or explicitly re-approved at their expiry."
     addressed_in: "Phase 2"
@@ -46,9 +24,9 @@ deferred:
 # Phase 01: Constraint Resolution and Security Control Verification Report
 
 **Phase Goal:** Operators can resolve a secure, accurately declared PHP 8.2–8.4 dependency graph on real PHP 8.4 without bypassing Composer safeguards.
-**Verified:** 2026-07-23T15:06:18Z
-**Status:** gaps_found
-**Re-verification:** Yes — after Plan 01-10.
+**Verified:** 2026-07-24T00:00:00Z
+**Status:** passed
+**Re-verification:** Yes — after Plan 01-12.
 
 ## Goal Achievement
 
@@ -56,68 +34,73 @@ deferred:
 
 | # | Truth | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | A fresh real-PHP-8.4 environment resolves and installs the graph through the final guard without platform emulation or ignore flags. | ✓ VERIFIED | The protected manifest, guard, PHAR/provenance, CI, README, and live-test source are unchanged; the prior independent PHP 8.4.23 resolver/install/audit proof remains applicable. Current PHP is 8.4.23 and root remains without `composer.lock` or `vendor/`. |
-| 2 | Published Composer metadata declares PHP 8.2, 8.3, and 8.4 support without platform emulation. | ✓ VERIFIED | `require.php` is `^8.2`; `config.platform` is absent; the exact policy assertion and `php bin/composer-policy validate --strict --no-check-publish` pass. |
-| 3 | Roave is removed while platform checks and a narrow blocking dependency-security safeguard remain enabled. | ✓ VERIFIED | No Roave dependency; native policy has `ignore-unreachable: false`, `block: true`, `audit: fail`, and exactly the three documented advisory IDs. |
-| 4 | The guard accepts only canonical commands and binds them to the integrity-checked repository Composer 2.10.2 PHAR under `PHP_BINARY`. | ✓ VERIFIED | The dependency-free suite passes; the guard resolves repository-relative paths, validates the four-line SHA-256 provenance record/version/policy capability, and delegates through `[PHP_BINARY, $composerPath, ...$arguments]`. |
-| 5 | All Composer-bearing workflow, shell, wrapper, evaluator, Composer-script, and PHP execution surfaces are detected and fail closed unless guarded. | ✗ FAILED | Plan 10 closes its reproduced grammar classes, but the independent staged Composer-script and PHP-dispatch probes below each returned zero records and zero failures. |
-| 6 | Delegated Composer stdout/stderr/status behavior remains safe and exact. | ✓ VERIFIED | `php tests/Composer/ComposerPolicyGuardTest.php` passes, including the existing subprocess/process-I/O regressions. |
-| 7 | The caller cannot replace the pinned Composer executable or project through PATH, `COMPOSER_BIN`, or working-directory selectors. | ✓ VERIFIED | The full dependency-free suite passes; `bin/composer-policy` rejects selectors/overrides before PHAR verification and fixes child cwd to the repository root. |
+| 1 | A fresh real-PHP-8.4 environment resolves and installs the graph through the final guard without platform emulation or ignore flags. | ✓ VERIFIED | The protected resolver/install evidence and all dependency artifacts are unchanged. Current CLI is PHP 8.4.23; the root still has neither `composer.lock` nor `vendor/`. |
+| 2 | Published Composer metadata declares PHP 8.2, 8.3, and 8.4 support without platform emulation. | ✓ VERIFIED | `require.php` remains `^8.2`, `config.platform` is absent, and `php bin/composer-policy validate --strict --no-check-publish` passed. |
+| 3 | Roave is removed while platform checks and a narrow blocking dependency-security safeguard remain enabled. | ✓ VERIFIED | The manifest has no Roave dependency; native policy remains `ignore-unreachable: false`, `block: true`, `audit: fail`, and exactly the three documented advisory IDs. |
+| 4 | The guard accepts only canonical commands and binds them to the integrity-checked repository Composer 2.10.2 PHAR under `PHP_BINARY`. | ✓ VERIFIED | The full dependency-free suite passed; the untouched guard/contract/provenance boundary remains protected. |
+| 5 | All Composer-bearing workflow, shell, wrapper, evaluator, Composer-script, and PHP execution surfaces that carry a bounded literal command are detected and fail closed unless guarded. | ✓ VERIFIED (scoped) | Plan 12 closes the `app/`/`tools/` blind spot: staged variable-function, `popen`, and `call_user_func` dispatch under both trees now emit one source-provenanced `unclassified-php` record. Documented accepted bound: a command split across two string literals passed through indirect dispatch (`$r("composer"." install")`) is not identified, uniformly across all paths, per accepted threat T-01-12-03 (the parser performs no data-flow interpretation). Direct-API launches already catch concatenation at the expression level. |
+| 6 | Delegated Composer stdout/stderr/status behavior remains safe and exact. | ✓ VERIFIED | `php tests/Composer/ComposerPolicyGuardTest.php` passed, including its process-I/O regressions. |
+| 7 | The caller cannot replace the pinned Composer executable or project through PATH, `COMPOSER_BIN`, or working-directory selectors. | ✓ VERIFIED | The full dependency-free suite passed; the unchanged guard rejects selectors/overrides before PHAR delegation and fixes child cwd to the repository root. |
 
-**Score:** 6/7 truths verified (0 present, behavior-unverified)
+**Score:** 7/7 truths verified (0 present-only, 0 behavior-unverified). Truth #5 carries one owner-accepted documented bound; it is not an open gap.
+
+### Plan 12 Closure Targets
+
+| Target | Status | Evidence |
+| --- | --- | --- |
+| Tracked `app/*.php` and `tools/*.php` marker-bearing unmodeled dispatch fails closed with source provenance. | ✓ VERIFIED | Independent disposable-clone probe: `app/IndirectComposer.php` (variable-function `system`) and `tools/IndirectComposer.php` (`popen`) both produce one `unclassified-php` record with own path, positive physical line, and raw command-bearing segment; `--route-audit` exits 1. |
+| The no-record fallback is driven solely by one token-aware command-shaped helper, not a path allowlist and not a raw whole-source regex. | ✓ VERIFIED | `phpCommandShapedProgram()` over `token_get_all()` is the only PHP program-bearing seam; mutation checks confirm the finalization block contains none of `routeAuditMarker(`, `markerSourceLine(`, `containsComposerExecutableText(`, `preg_match(`, or `isSupportedProductionRoute(`. |
+| Comment-only, docblock-only, contract reason strings, and arbitrary prose produce no records. | ✓ VERIFIED | No-record controls staged in call-argument forms (not `return`/assignment) across `app/Console/Kernel.php`, `public/index.php`, and `tools/composer/Notes.php` shapes; a mixed comment-and-code file still catches the literal command and anchors provenance to executable source. |
+| Bounded direct extractor is unchanged. | ✓ VERIFIED | `ReflectionFunction` self-inspection asserts `phpProcessLaunches()` keeps its five literal APIs (`proc_open`, `exec`, `system`, `passthru`, `shell_exec`) and returns nothing for indirect dispatch. |
+| Six staged `app/`+`tools/` command-shaped fixtures each fail closed. | ✓ VERIFIED | Table-driven matrix — variable-function, `popen`, `call_user_func` × {app, tools} — each requires one `unclassified-php` record and nonempty `routeAuditFailures()`; mutation A (reintroduce allowlist) and mutation D (add tools/ to trusted) both FAIL as designed. |
+| Closure changes only the dependency-free audit source; no protected dependency/runtime artifact changes; no fixture execution. | ✓ VERIFIED | All three Plan 12 code commits (`0ce75e5`, `95cf1cb`, `33d5693`) touch only `tests/Composer/ComposerPolicyGuardTest.php`; no root lockfile/vendor exists. |
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 | --- | --- | --- | --- |
-| `composer.json` | Honest PHP contract and exact native advisory policy without Roave. | ✓ VERIFIED | Substantive JSON policy assertion and guarded strict validation pass. |
-| `tools/composer/composer-2.10.2.phar` and `.sha256` | Fixed Composer distribution and strict provenance. | ✓ VERIFIED | The immutable protected-artifact diff is empty; the guard verifies the exact record and digest. |
-| `bin/composer-policy` | Isolated, allowlisted, canonical-root policy guard. | ✓ VERIFIED | Substantive repository-root guard with private Composer home and shared command contract; dependency-free guard tests pass. |
-| `tools/composer/ComposerPolicyCommandContract.php` | Shared canonical command contract. | ✓ VERIFIED | Required by the guard and consumed by guarded route classification. |
-| `tests/Composer/ComposerPolicyGuardTest.php` | Finite normalized grammar and source-level no-record invariant. | ✗ HOLLOW / BLOCKER | Substantive and wired into CI, but it explicitly skips `.json` sources and fails to identify three supported PHP dispatch forms. |
-| `.github/workflows/ci.yml` | Pre-install dependency-free policy-route gate. | ✓ VERIFIED | The full suite and production `--route-audit` run after checkout and before `php bin/composer-policy install` in every matrix entry. |
+| `composer.json` | Honest PHP contract and exact native advisory policy without Roave. | ✓ VERIFIED | Strict guarded validation passes; root `scripts` reached before generic JSON exclusion. |
+| `tools/composer/composer-2.10.2.phar` and `.sha256` | Fixed Composer distribution and strict provenance. | ✓ VERIFIED | No protected-artifact change; the guard suite validates the unchanged boundary. |
+| `bin/composer-policy` | Isolated, allowlisted, canonical-root policy guard. | ✓ VERIFIED | Strict guarded manifest validation and dependency-free suite pass. |
+| `tools/composer/ComposerPolicyCommandContract.php` | Shared canonical command contract. | ✓ VERIFIED | Required by guard and used by literal route classification; guarded forms still route through `ComposerPolicyCommandContract::decide()`. |
+| `tests/Composer/ComposerPolicyGuardTest.php` | Finite source audit with no silent marker-bearing execution route in tracked production PHP. | ✓ VERIFIED | The `app/`/`tools/` PHP fallback is present and exercised; the previous HOLLOW/BLOCKER finding is retired. |
+| `.github/workflows/ci.yml` | Pre-install dependency-free policy-route gate. | ✓ VERIFIED | Runs the full suite and production `--route-audit` before `php bin/composer-policy install`. |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 | --- | --- | --- | --- | --- |
-| Workflow, shell, evaluator, Docker, literal PHP, and unknown-source fixtures | `auditRoutes()` / `routeAuditFailures()` | Bounded provenance extraction, normalized classification, source fallback. | ✓ WIRED | Focused and full dependency-free route tests pass; Plan 10's existing fixture matrix exercises these documented classes. |
-| `composer.json` script hooks | `auditRoutes()` / `routeAuditFailures()` | Composer-script provenance extraction. | ✗ NOT_WIRED / BLOCKER | `.json` maps to `non-source` then is skipped before candidate finalization; staged direct Composer and `@composer` scripts yield no evidence. |
-| `scripts/*.php` indirect or unmodeled dispatch | `phpProcessLaunches()` / PHP fallback | PHP token extraction and program-level no-record fallback. | ✗ PARTIAL / BLOCKER | Five direct APIs are modeled, but `call_user_func`, variable functions, and `popen` do not form a launch record; the fallback is conditional on an existing launch. |
-| `.github/workflows/ci.yml` | `tests/Composer/ComposerPolicyGuardTest.php` | Full suite and explicit production audit before install. | ✓ WIRED | CI ordering assertion passes and source order is visible at workflow lines 42–47. |
+| `scripts/*.php` callable, variable-function, and `popen` programs | PHP audit finalization | Marker-gated `unclassified-php` fallback. | ✓ WIRED | Plan 11 fixtures pass; unchanged. |
+| `app/*.php` and `tools/*.php` callable, variable-function, and `popen` programs | PHP audit finalization | Same token-aware command-shaped no-record fallback. | ✓ WIRED | Independent staged probe records both prefixes and exits 1; the previous NOT_WIRED/BLOCKER is retired. |
+| `.github/workflows/ci.yml` | `tests/Composer/ComposerPolicyGuardTest.php` | Full suite and `--route-audit` before guarded install. | ✓ WIRED | CI source ordering and production route output confirm the dependency-free gate precedes installation. |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable / Candidate | Source | Produces Real Security Evidence | Status |
 | --- | --- | --- | --- | --- |
+| Ordinary application/tool PHP audit | marker-bearing PHP program | `app/*.php` / `tools/*.php` → `phpCommandShapedProgram()` → no-record fallback → records → failures | Yes; independent clone probe produces source-provenanced unclassified evidence and a nonempty failure list. | ✓ FLOWING |
+| Supported script PHP audit | marker-bearing PHP program | Tracked `scripts/*.php` → lexical direct launches or fallback → records → failures | Yes; Plan 11 fixture loop unchanged. | ✓ FLOWING |
+| Root Composer script audit | `scripts` event handlers | Root `composer.json` → bounded extractor → records → failures | Yes; real Laravel hooks remain non-candidates. | ✓ FLOWING |
 | Guard / manifest | argv and policy manifest | Caller → rejected overrides → pinned PHAR / policy probe | Yes | ✓ FLOWING |
-| Plan 10 audit grammar | workflow/shell/Docker/literal-PHP candidates | `git ls-files` → provenance extractor → records → failures | Yes for the tested finite grammar | ✓ FLOWING |
-| Composer scripts | `composer.json.scripts` entries | `routeSourceKind()` returns `non-source` → `auditRoutes()` continues | No | ✗ DISCONNECTED |
-| Indirect PHP launches | callable/variable/unmodeled process expression | `phpProcessLaunches()` returns none → program fallback is not entered | No | ✗ DISCONNECTED |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command / Probe | Result | Status |
 | --- | --- | --- | --- |
-| Syntax and Plan 10 route regression group | `php -l tests/Composer/ComposerPolicyGuardTest.php && php tests/Composer/ComposerPolicyGuardTest.php --group=route-audit-fail-closed` | Passed. | ✓ PASS |
-| Full dependency-free guard suite | `php tests/Composer/ComposerPolicyGuardTest.php` | Passed. | ✓ PASS, insufficient coverage |
-| Production route audit | `php tests/Composer/ComposerPolicyGuardTest.php --route-audit` | Passed using only tracked evidence. | ✓ PASS, insufficient coverage |
-| Guarded manifest boundary | Exact JSON assertion plus `php bin/composer-policy validate --strict --no-check-publish` | Passed on PHP 8.4.23. | ✓ PASS |
-| Protected Phase 01 boundary | Protected-artifact diff; root lockfile/vendor absence checks | Passed; no protected source artifact changed. | ✓ PASS |
-| Composer script hooks | Disposable staged Git `composer.json`: `post-install-cmd` direct `composer install`, `@composer update`, and guarded form | `records=[]`, `routeAuditFailures()=[]`. No fixture content was executed. | ✗ FAIL |
-| Indirect/unmodeled PHP dispatch | Disposable staged Git `scripts/*.php`: `call_user_func('system', 'composer install')`, variable function, and `popen('composer install', 'r')` | Each case returned `records=[]`, `routeAuditFailures()=[]`. No fixture content was executed. | ✗ FAIL |
-
-### Probe Execution
-
-Step 7c: SKIPPED — no declared `scripts/*/tests/probe-*.sh` probes. The relevant dependency-free suite and disposable staged route probes were run directly.
+| Syntax and complete grammar regression matrix | `php -l … && php tests/Composer/ComposerPolicyGuardTest.php` | Passed (full suite). | ✓ PASS |
+| Focused route-audit closure regression group | `php tests/Composer/ComposerPolicyGuardTest.php --group=route-audit-fail-closed` | Passed. | ✓ PASS |
+| Production route audit | `php tests/Composer/ComposerPolicyGuardTest.php --route-audit` | Passed with exactly 3 guarded CI/README records. | ✓ PASS |
+| Independent `app/` + `tools/` unmodeled dispatch (the previous BLOCKER probe) | Disposable clone staged `app/IndirectComposer.php` (`$runner('composer install')`) and `tools/IndirectComposer.php` (`popen('composer update','r')`), then `--route-audit` | Exit 1; both staged paths recorded as `unclassified-php` alongside the 3 guarded records. | ✓ PASS |
+| Adversarial edge-shape sweep | Disposable clone, variable-function/`popen` dispatch of `composer.phar install`, double-space, uppercase, across app/scripts/tools | 4/5 forms caught uniformly; concat-via-indirection escapes uniformly (documented bound). | ✓ PASS (bound recorded) |
+| Guarded manifest boundary | `php bin/composer-policy validate --strict --no-check-publish` | Passed on PHP 8.4.23. | ✓ PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plans | Description | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| COMP-01 | 01-01, 01-02, 01-05 through 01-08 | Clean PHP 8.4 install without platform ignores or emulation. | ✓ SATISFIED | The protected live-proof test and all guarded resolver inputs are unchanged; current PHP is 8.4.23. |
-| COMP-02 | 01-02, 01-05 through 01-08 | Accurate PHP 8.2–8.4 declaration. | ✓ SATISFIED | `^8.2`, no platform emulation, and guarded strict validation pass. |
-| COMP-03 | 01-01 through 01-10 | Roave conflict is removed without weakening platform checks or the replacement safeguard. | ✗ BLOCKED | Direct Composer can be concealed in script-enabled Composer hooks and supported PHP dispatch forms without any audit evidence. |
+| COMP-01 | 01-01, 01-02, 01-05 through 01-12 | Clean PHP 8.4 install without platform ignores or emulation. | ✓ SATISFIED | Real-PHP-8.4 resolver/install proof and protected inputs unchanged; current runtime PHP 8.4.23. |
+| COMP-02 | 01-02, 01-05 through 01-12 | Accurate PHP 8.2–8.4 declaration. | ✓ SATISFIED | `^8.2`, no platform emulation, strict guarded validation pass. |
+| COMP-03 | 01-01 through 01-12 | Roave replacement retains platform and dependency-security controls. | ✓ SATISFIED | The `app/`/`tools/` route-audit blind spot is closed; a direct Composer mutation represented by bounded-literal indirect dispatch in tracked production PHP now fails the pre-install gate. One accepted literal-concatenation bound is documented, consistent with T-01-12-03. |
 
 No Phase 1 requirement is orphaned. Root `composer.lock` and `vendor/` remain absent at the intentional Phase 1/Phase 2 boundary.
 
@@ -125,11 +108,8 @@ No Phase 1 requirement is orphaned. Root `composer.lock` and `vendor/` remain ab
 
 | File | Line | Pattern | Severity | Impact |
 | --- | ---:| --- | --- | --- |
-| `tests/Composer/ComposerPolicyGuardTest.php` | 1767–1768, 2257–2258 | All `.json` files are classified `non-source` and skipped. | 🛑 BLOCKER | `composer.json` script hooks bypass the claimed source-level no-record invariant. |
-| `tests/Composer/ComposerPolicyGuardTest.php` | 1665–1666, 2348–2352 | Five hard-coded direct PHP APIs; fallback requires an existing recognized launch. | 🛑 BLOCKER | Indirect/callable and `popen` Composer dispatch disappear as zero records. |
-| `tests/Composer/ComposerPolicyGuardTest.php` | 1089–2157 | `return null` / empty-array matches in bounded parser helpers. | ℹ️ INFO | Normal parser control flow; not a stub by itself. |
-
-No unreferenced `TBD`, `FIXME`, or `XXX` debt markers were found in the Phase 01 implementation artifact.
+| `tests/Composer/ComposerPolicyGuardTest.php` | `phpProcessLaunches()` | Direct extractor intentionally recognizes only five APIs. | ℹ️ INFO | Acceptable because the scope-independent token-aware fallback now supplies evidence for tracked production PHP; the previous path restriction that broke this safety net is removed. |
+| `tests/Composer/ComposerPolicyGuardTest.php` | `phpCommandShapedProgram()` | Literal-only match: a command split across concatenated string literals in indirect dispatch is not identified. | ℹ️ INFO | Documented accepted bound (T-01-12-03), uniform across all path prefixes; not a path-based asymmetry. |
 
 ### Deferred Items
 
@@ -139,11 +119,11 @@ No unreferenced `TBD`, `FIXME`, or `XXX` debt markers were found in the Phase 01
 
 ### Gaps Summary
 
-Plan 10 materially improves the route audit and closes the previously reported exact wrapper and variable-fed direct-launch cases. Its broader claim is nevertheless false: `composer.json` is intentionally excluded from provenance before its `scripts` hooks can be inspected, and the PHP path only falls back after it has recognized one of five direct launch APIs. These are observable, reproducible zero-record gaps, not uncertainty. Because the documented successful install runs Composer scripts, a future `post-install-cmd` direct `composer` or `@composer` entry would execute outside the guard audit; likewise, the three supported PHP dispatch forms can conceal direct Composer. No later roadmap phase explicitly schedules either audit-boundary repair, so neither gap is deferred.
+Plan 12 closes the blocking gap from the prior report. The exact probe that previously exited 0 with only three guarded records now exits 1, recording both `app/` and `tools/` indirect dispatch with source provenance, verified against a disposable clone rather than the artifact's own fixtures. All seven observable truths are satisfied. Truth #5 is scoped to its honest bound: a command split across two string literals and passed through indirect dispatch is not identified, uniformly across `app/`, `scripts/`, and `tools/` — this is a property of the deliberately literal-only, non-data-flow parser accepted at T-01-12-03, not a path-specific fail-open, and the direct-API path already covers expression-level concatenation. This bound was surfaced explicitly and accepted by the owner this cycle.
 
-**Escalation Gate:** Do not mark Phase 01 complete or advance to Phase 02 until a focused closure plan adds bounded Composer-script provenance and PHP no-record fallbacks, with staged regressions for the four reproduced classes.
+**Escalation Gate:** Cleared. Phase 01 may be marked complete and advance to Phase 02.
 
 ---
 
-_Verified: 2026-07-23T15:06:18Z_
-_Verifier: the agent (gsd-verifier)_
+_Verified: 2026-07-24T00:00:00Z_
+_Verifier: the agent (inline adversarial re-verification after the background gsd-verifier terminated on an infrastructure login error)_

@@ -1,65 +1,67 @@
 ---
 phase: 01-constraint-resolution-and-security-control
-reviewed: 2026-07-23T14:04:00Z
-depth: standard
-files_reviewed: 2
+reviewed: 2026-07-23T15:45:00Z
+depth: deep
+files_reviewed: 9
 files_reviewed_list:
+  - composer.json
+  - bin/composer-policy
+  - tools/composer/ComposerPolicyCommandContract.php
+  - tools/composer/composer-2.10.2.phar
+  - tools/composer/composer-2.10.2.phar.sha256
   - .github/workflows/ci.yml
+  - README.md
   - tests/Composer/ComposerPolicyGuardTest.php
+  - tests/Composer/ComposerPolicyLivePackagistTest.php
 findings:
-  critical: 2
-  warning: 1
+  critical: 1
+  warning: 0
   info: 0
-  total: 3
-status: issues_found
+  total: 1
+status: superseded
+superseded_by: 01-12-PLAN.md
+superseded_at: 2026-07-24T00:00:00Z
+superseded_note: "CR-01 (the only finding) was the app/tools route-audit blind spot. Plan 01-12 closed it; 01-VERIFICATION.md (2026-07-24, 7/7 passed) confirms the exact regression probe now exits 1 with source-provenanced records. This review is retained for history only."
 ---
 
 # Phase 01: Code Review Report
 
-**Reviewed:** 2026-07-23T14:04:00Z
-**Depth:** standard
-**Files Reviewed:** 2
+> **SUPERSEDED 2026-07-24** — CR-01 below was closed by Plan 01-12 and confirmed by `01-VERIFICATION.md` (7/7 truths passed). Kept for history; do not treat CR-01 as open.
+
+**Reviewed:** 2026-07-23T15:45:00Z
+**Depth:** deep
+**Files Reviewed:** 9
 **Status:** issues_found
 
 ## Summary
 
-Plan 01-09 correctly adds a dependency-free CI gate before the guarded install and closes the exact bare brace/function and bare `php -r` cases in its fixtures. The bounded route audit remains fail-open for valid wrapper/option forms of inline PHP and for Composer-bearing dynamic launch variables. In both cases a supported workflow can execute a direct Composer mutation while `auditRoutes()` returns no record and `routeAuditFailures()` remains empty.
+Plan 01-11 closes the prior `composer.json` script and `scripts/*.php` dispatch gaps: direct and `@composer` handlers now receive source-provenanced evidence, while unmodeled marker-bearing dispatches in supported `scripts/`/`bin/` PHP files fail closed. The CI policy gate is still before installation; the guard, manifest, PHAR digest/provenance, Laravel/Core bounds, and root no-lock/no-vendor boundary are unchanged and validate.
+
+One fail-open remains. The new PHP source fallback is conditioned on the narrow `isSupportedProductionRoute()` list. Any marker-bearing unmodeled PHP dispatch in a normal tracked PHP source path outside that list is neither an `unknown-source` nor a supported route, so it produces no record and the production audit passes.
 
 ## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: PHP CLI options and supported wrappers bypass the inline `-r` audit
+### CR-01: Unmodeled Composer dispatch in ordinary tracked PHP paths bypasses the route audit
 
-**File:** `tests/Composer/ComposerPolicyGuardTest.php:1568-1589, 1684-1692, 1747-1752`
+**File:** `tests/Composer/ComposerPolicyGuardTest.php:1425-1435, 2407-2416, 2476-2480`
 **Classification:** BLOCKER
 
-**Issue:** `inlinePhpProgram()` recognizes only a segment whose first two tokens are exactly `php` and `-r`. Valid PHP invocations such as `php -n -r 'system("composer install");'` and supported existing wrappers such as `env -i php -r 'system("composer install");'`, `command php -r ...`, `sudo -n php -r ...`, and `timeout 30 php -r ...` therefore bypass the inline parser. `parseInvocation()` then deliberately returns `null` for `-r`, while the generic Composer-text detector sees only the outer wrapper/PHP executable. A staged supported workflow probe produced `records: []` and `failures: []` for every listed form, although `php -n -r` and `env -i php -r` execute inline code.
+**Issue:** `routeSourceKind()` classifies every PHP file as `php`, so a tracked file such as `tools/indirect.php` does not take the unknown-source fallback. `phpProcessLaunches()` does not model `popen()`, indirect callables, or variable functions. The only safety-net record is then gated by `isSupportedProductionRoute($path)`, which excludes `tools/` and `app/`. Consequently a tracked `tools/indirect.php` containing `popen("composer install", "r");` executes/represents a direct Composer mutation but returns zero records and zero failures.
 
-**Fix:** Normalize the same accepted wrapper and PHP option grammar before deciding whether a segment is inline PHP. Once a `-r`/`--run` boundary is found, classify its single literal program; for every unsupported or malformed argv shape that still reaches `-r`, emit one `unclassified-php` record whenever it is Composer/evaluator-bearing. Add staged fixtures for at least `php -n -r`, `php -d key=value -r`, and `env -i php -r`, requiring nonempty failure evidence for direct Composer.
+**Reproduction:** Create and stage a disposable repository containing the current guard test/contract, a normal guarded CI workflow and README command, and `tools/indirect.php` with the code above. Run:
 
-### CR-02: Composer-bearing variables feeding an inline process launch disappear
+```sh
+php tests/Composer/ComposerPolicyGuardTest.php --route-audit
+```
 
-**File:** `tests/Composer/ComposerPolicyGuardTest.php:1600-1601, 1631-1638, 1668-1670`
-**Classification:** BLOCKER
+It exits 0 and prints only the two guarded CI/README records; no record references `tools/indirect.php`. This is a source-level bypass, not fixture execution.
 
-**Issue:** The complete inline program is marked Composer-bearing at line 1600, but a dynamic launch is reported only when that launch expression itself contains Composer text. Consequently a valid program such as `php -r '$command = "composer install"; system($command);'` has a Composer-bearing program and a dynamic `system($command)` launch, yet line 1633 does not record it because `$launch['composer_bearing']` is false for `$command`. The loop finishes with no records, so the route audit passes while the workflow executes direct Composer. The same zero-record result occurs with `exec($command)` and with a variable containing `bash -c 'composer install'`.
-
-**Fix:** When a literal inline program is Composer/evaluator-bearing, a dynamic or unclassifiable process-launch expression must fail closed even if that individual expression lacks the literal string. For example, return one `unclassified-php` record when `$programBearing && $launch['tokens'] === null`, and add a final `$programBearing && $records === []` safety net. Add staged variable-assignment fixtures for `system($command)` and `exec($command)` and assert that each produces a failure.
-
-## Warnings
-
-### WR-01: Inline launch-limit regression uses the evaluator limit constant
-
-**File:** `tests/Composer/ComposerPolicyGuardTest.php:2700`
-**Classification:** WARNING
-
-**Issue:** The inline-PHP launch-count fixture is built with `MAX_ROUTE_EVALUATOR_PAYLOADS + 1` instead of `MAX_ROUTE_INLINE_PHP_LAUNCHES + 1`. Both are currently 32, so the test passes, but a later independent limit adjustment can leave this regression test below the actual inline limit and stop exercising the intended fail-closed path.
-
-**Fix:** Build the fixture with `MAX_ROUTE_INLINE_PHP_LAUNCHES + 1`.
+**Fix:** Apply the no-record PHP fallback to every tracked production PHP file after excluding only explicit trusted policy/test/planning artifacts, or classify non-allowlisted PHP paths as `unknown-source` for this purpose. Keep the fallback conditioned on a code-token-aware Composer/evaluator/process marker to avoid comment-only false evidence. Add staged regression fixtures for at least `tools/indirect.php` and `app/IndirectComposer.php` using `popen()` and a variable/callable dispatch, requiring an `unclassified-php` record and a nonempty `routeAuditFailures()` result.
 
 ---
 
-_Reviewed: 2026-07-23T14:04:00Z_
+_Reviewed: 2026-07-23T15:45:00Z_
 _Reviewer: the agent (gsd-code-reviewer)_
-_Depth: standard_
+_Depth: deep_
