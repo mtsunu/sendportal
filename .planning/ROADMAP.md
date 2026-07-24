@@ -69,7 +69,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Tracer: freeze, track, and validate the lockfile end-to-end (regenerate via guard, prove zero drift, consume via install).
+- [x] 02-01-PLAN.md — Tracer: freeze, track, and validate the lockfile end-to-end (regenerate via guard, prove zero drift, consume via install).
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -98,5 +98,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Constraint Resolution and Security Control | 7/7 | Complete | 2026-07-24 |
-| 2. Reproducible Dependency Snapshot | 0/TBD | Not started | - |
+| 2. Reproducible Dependency Snapshot | 1/2 | In Progress|  |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/TBD | Not started | - |
