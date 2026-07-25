@@ -1,8 +1,14 @@
 # Stack Research
 
-**Domain:** PHP 8.4 compatibility for an existing Laravel 11 SendPortal host
-**Researched:** 2026-07-22
-**Confidence:** MEDIUM
+**Domain:** Coordinated cross-process rate limiting for SES email sends (Laravel 11 host, PHP 8.4, Horizon/Redis)
+**Researched:** 2026-07-25
+**Confidence:** HIGH (verified against the installed vendor source, not memory — `laravel/framework` 11.55.0 in the committed lock, running on PHP 8.4.23)
+
+## Scope note
+
+This is a v1.1 focused-fix milestone. The existing stack (Laravel 11, `mettle/sendportal-core` 3.0.2, Horizon on Redis, PHP 8.4) is **not** re-researched. This file answers one question: **which existing primitive should implement the Redis-backed, cross-process, per-second SES send limiter — with ZERO new dependencies and no edits to `vendor/mettle/sendportal-core`.**
+
+The throttle seam is fixed by the codebase: `Sendportal\Base\Adapters\SesMailAdapter::send()` calls `throttleSending()` (from `Sendportal\Base\Traits\ThrottlesSending`) around each `sendEmail()`. Both are vendor-owned. The only host-level override seam is **re-binding the SES mail adapter in the container** (in `app/`) with a subclass that wraps the SES call in a limiter. That means the limiter runs **inline inside an adapter method**, NOT at a Job boundary — a decisive constraint for option selection (see below).
 
 ## Recommended Stack
 
@@ -10,166 +16,118 @@
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| PHP | 8.4.23 target (8.4.x patched releases) | Application runtime | PHP 8.4 is actively supported through 2026-12-31 and receives security fixes through 2028-12-31. Laravel 11 officially supports PHP 8.2–8.4, so no Laravel-major upgrade is required for this runtime change. |
-| Laravel Framework | `^11.0`, resolved to one tested patch version | Framework and Illuminate Mail provider | Laravel 11 is compatible with PHP 8.4. Keep the Laravel major fixed for this focused compatibility milestone; the generated lockfile, not a floating deployment resolution, chooses the exact patch release. |
-| Composer | `>=2.10.0 <3.0` in CI and release tooling | Dependency resolution, platform verification, advisory policy | Composer 2.10 supplies the native `config.policy` security controls. It replaces the incompatible Roave metapackage without introducing an artificial conflict into the Laravel graph. |
-| Mettle SendPortal Core | `^3.0`, resolved to `3.0.2` unless an upstream compatible release is intentionally adopted | SendPortal domain package | Its declared PHP range, `^8.2|^8.3`, already includes every PHP version from 8.2 up to (but not including) 9.0. It is therefore Composer-compatible with PHP 8.4; do not fork it merely to append `^8.4`. |
+| `Illuminate\Support\Facades\Redis::throttle()` → `Illuminate\Redis\Limiters\DurationLimiter` | Laravel 11.55 (bundled) | Atomic, Redis-Lua, cross-process duration limiter that paces the SES call to N acquisitions per 1-second window | Already installed; genuinely atomic across processes (single `EVAL`); `every(1)` maps exactly to "per second"; can **block** to pace (not just fail); zero new deps; identical engine that Laravel's own `RateLimitedWithRedis` job middleware uses, so it is battle-tested |
+| `Illuminate\Support\Facades\Redis` facade | Laravel 11.55 (bundled) | Resolves the shared Redis connection all workers use | Facade → container binding `redis` → `Illuminate\Redis\RedisManager` → `Illuminate\Redis\Connections\PhpRedisConnection`. Same connection Horizon uses (`default`, DB 0), so every worker process coordinates on the same keyspace |
+| `Illuminate\Contracts\Redis\LimiterTimeoutException` | Laravel 11.55 (bundled) | Signals "no token acquired within block timeout" | Lets the override decide: bounded wait then either proceed to the existing retry/backoff path or fail cleanly (feeds SES-04) |
 
 ### Supporting Libraries
 
-| Library / mechanism | Version | Purpose | When to Use |
-|---------------------|---------|---------|-------------|
-| Composer native advisory policy | Composer 2.10+ | Blocks known-insecure dependency versions while resolving updates | Configure it in the root `composer.json` after removing Roave. Keep explicit `composer audit --locked` in CI to check the exact production graph. |
-| Composer platform check | Composer default, configured as `true` | Checks PHP and required extensions at autoloader bootstrap | Enable it for deployments so the installed graph cannot begin on a host missing a required platform package. |
-| Composer lockfile | generated on PHP 8.4 | Reproducible dependency graph | Commit it after the PHP 8.4 resolution passes validation and tests. CI and production must use `composer install`, never a fresh update. |
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `Illuminate\Support\Facades\Cache` (`Cache::remember`) | bundled | Cache SES `getSendQuota()['MaxSendRate']` ~5 min (SES-02) to feed `allow($rate)` | Already the idiomatic cache seam; use the `redis`/default store |
+| Custom Redis Lua token bucket via `Redis::connection()->eval()` | n/a (host code in `app/`) | **Escalation only** — smooth (sub-second, continuous-refill) pacing if the fixed-window boundary burst of `DurationLimiter` proves to trip SES in production | Only adopt if the primary option's window-rollover burst (see caveat) is observed to matter; still zero new deps |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| Composer `validate --strict` | Validates manifest and lock consistency | Run before committing `composer.json` / `composer.lock`; Composer’s own CLI documentation explicitly recommends this. |
-| Composer `check-platform-reqs` | Verifies the *actual* PHP runtime and extensions | Run after install on PHP 8.4. It ignores any simulated `config.platform` values, which makes it the decisive deployment check. |
-| Composer `audit --locked` | Fails CI for vulnerabilities or abandoned packages in the lockfile | Run after `composer install`; use the locked graph so audit evaluates what will actually be deployed. |
-| PHPUnit | Regression verification | Add PHP 8.4 to the existing MySQL/PostgreSQL matrix and retain the existing PHP 8.2/8.3 lanes only if they remain supported deployment targets. |
+| PHPUnit 10 (existing) | Test the limiter override against a real/fake Redis | Assert cross-process semantics by driving the `DurationLimiter` name directly; time-freeze with `Illuminate\Support\Sleep::fake()` and `Carbon::setTestNow()` (the limiter's `block()` uses `Illuminate\Support\Sleep`, which is test-fakeable) |
 
-## Required Manifest and Tooling Changes
-
-### 1. Keep the PHP constraint semantically correct; simplify rather than widen it
-
-The current root range, `^8.2|^8.3`, already allows PHP 8.4. Composer defines `^1.2.3` as `>=1.2.3 <2.0.0`; consequently `^8.2` means `>=8.2.0 <9.0.0`. The identical observation applies to SendPortal Core `3.0.2`.
-
-Use the equivalent, non-redundant root constraint below if the manifest is being touched. It preserves PHP 8.2, 8.3, and 8.4 support while preventing an accidental PHP 9 resolution:
-
-```json
-{
-  "require": {
-    "php": "^8.2"
-  }
-}
-```
-
-This change is optional for resolution—PHP 8.4 already satisfies the current range—but recommended for clarity. Do **not** introduce an unsupported claim that `mettle/sendportal-core` needs a PHP-8.4 fork; its current caret constraint admits 8.4.
-
-### 2. Remove Roave and use Composer’s native security policy
-
-Remove this development dependency:
-
-```json
-"roave/security-advisories": "dev-master"
-```
-
-Current Roave metadata conflicts with `illuminate/mail >=9,<12.60`; that includes every Laravel 11 Illuminate Mail release. Changing `dev-master` to `dev-latest` does not solve this: it tracks the same current conflict list. Pinning an old Roave commit would only make the resolver pass by freezing stale vulnerability knowledge, so it is not an acceptable compatibility or security solution.
-
-With Composer 2.10+, add the native policy under the existing `config` block:
-
-```json
-{
-  "config": {
-    "platform-check": true,
-    "policy": {
-      "advisories": {
-        "block": true,
-        "audit": "fail"
-      },
-      "abandoned": {
-        "block": true,
-        "audit": "fail"
-      }
-    }
-  }
-}
-```
-
-This is the compatible replacement: it has no package-level conflicts, prevents advisory-affected versions during dependency changes, and makes audits fail in CI. Ensure the CI image installs Composer 2.10+ before relying on `config.policy`; the repository’s local validation environment is Composer 2.10.1. If temporarily constrained to an older Composer 2.x, use the documented legacy `config.audit` settings plus an explicit `composer audit --locked`, then migrate to `config.policy` when CI moves to 2.10+.
-
-### 3. Make stable, locked resolution the installation contract
-
-All direct requirements have stable releases. After Roave is removed, remove `"minimum-stability": "dev"` (Composer’s default is stable); retaining `"prefer-stable": true` is harmless but no longer needed to compensate for a dev-only security metapackage. This reduces accidental adoption of development branches.
-
-Generate the first lockfile on PHP 8.4, review its package changes, and commit it. Do not refresh it in production or on ordinary CI test jobs.
-
-## Installation and Verification
-
-Run the one-time resolution from a clean PHP 8.4 environment after changing the manifest:
+## Installation
 
 ```bash
-composer --version
-php -v
-composer validate --strict
-composer update --with-all-dependencies --prefer-dist --no-interaction
-composer check-platform-reqs
-composer audit --locked
-vendor/bin/phpunit
+# NOTHING to install. All primitives ship inside laravel/framework 11.55.0,
+# already present in the committed composer.lock and running on PHP 8.4.23.
+# Do NOT run composer require for a rate-limiter package.
 ```
 
-After committing `composer.lock`, CI and deployments should install the exact graph and then prove its safety and runtime fit:
+## The four options, compared against the hard requirements
 
-```bash
-composer install --prefer-dist --no-interaction --no-progress
-composer validate --strict
-composer check-platform-reqs
-composer audit --locked
-vendor/bin/phpunit
+Requirements: (a) coordinate across **separate worker processes** via shared Redis (not in-memory), (b) **per-second** granularity, (c) ability to **block/pace** vs merely signal, (d) whether it must live **inside a Job class**.
+
+| Option | Exact class/facade | Cross-process (shared Redis)? | Per-second? | Blocks or signals? | Requires being inside a Job? | Verdict |
+|--------|--------------------|-------------------------------|-------------|--------------------|------------------------------|---------|
+| **Redis funnel** ✅ | `Illuminate\Support\Facades\Redis::throttle($name)->allow($n)->every(1)->block($t)->sleep($ms)->then($ok,$fail)` → `Illuminate\Redis\Limiters\DurationLimiter` | **Yes** — one atomic `EVAL` Lua script (`HMSET`/`HINCRBY` on a shared key); all processes on the same connection contend on the same key | **Yes** — `every()` runs through `secondsUntil()`, whole-second window; `every(1)` = per second | **Both** — `block($timeout)` sleeps and retries until a slot frees, throwing `LimiterTimeoutException` on timeout; `then($ok,$fail)` gives an explicit failure callback | **No** — plain method call, works inline inside the adapter override | **RECOMMENDED** |
+| Cache RateLimiter | `Illuminate\Support\Facades\RateLimiter` → `Illuminate\Cache\RateLimiter::attempt($key,$max,$cb,$decaySeconds)` | **Conditionally** — only if `cache.default` resolves to a **shared** store (Redis/Memcached/DB). Uses `Cache::add`+`increment`; not a single atomic op, minor boundary races | Whole-second decay (`$decaySeconds`, min 1) | **Signals only** — returns `false` when limited; you'd hand-roll a sleep/retry loop to pace | No | Viable fallback, but strictly worse: depends on cache-store config, not purpose-built for pacing, no built-in block |
+| Queue job middleware | `Illuminate\Queue\Middleware\RateLimitedWithRedis` / `RateLimited` / `WithoutOverlapping` / `ThrottlesExceptionsWithRedis` | Yes (WithRedis variant wraps the same `DurationLimiter`) | Per-second via named limiter | **Neither blocks nor paces inline** — on limit it **releases the job back to the queue** with a delay (re-queue), freeing the worker | **YES — must be returned from a queued class's `middleware()` method** | **RULED OUT by constraints** — the queued unit (a Listener) and the throttle point (adapter method) are both in `vendor/mettle/sendportal-core`; attaching middleware needs editing/subclassing that vendor Job. Host-level-override-only forbids it. Also releases-instead-of-paces, which changes dispatch semantics |
+| Custom Lua token bucket | Host code in `app/` calling `Redis::connection('default')->eval($lua, ...)` | Yes — atomic `EVAL` on a shared key | **Yes, and sub-second/continuous-refill** — smoother than fixed window | Both (you write the wait loop) | No | Best precision, but more code to own/test. Keep as documented escalation, not the default |
+
+### Why the recommendation
+
+`Redis::throttle()` (the `DurationLimiter`) is the correct default because it satisfies every hard requirement with **no new dependency and no vendor edit**, and it is the *same* atomic Lua engine Laravel ships behind `RateLimitedWithRedis` — we simply invoke it inline (where the job-middleware form cannot reach) instead of at a Job boundary.
+
+Concrete override shape (host code in `app/`, `declare(strict_types=1)`, native types):
+
+```php
+// Inside a host SesMailAdapter subclass bound over the vendor adapter.
+$rate = (int) Cache::remember(
+    "ses:maxsendrate:{$accountKey}", now()->addMinutes(5),
+    fn (): int => (int) floor($this->getSendQuota()['MaxSendRate']),
+);
+
+return Redis::throttle("ses:send:{$accountKey}")
+    ->allow(max(1, $rate))
+    ->every(1)            // whole-second window == per-second pacing
+    ->block(10)           // wait up to 10s for a slot
+    ->sleep(100)          // retry every 100ms (default 750ms is too coarse — see caveat)
+    ->then(
+        fn () => $sendEmailClosure(),
+        function (): void { throw new /* clear */ ThrottleTimeoutException(); }, // feeds SES-04
+    );
 ```
 
-Update `.github/workflows/ci.yml` to include a PHP 8.4 container in the test matrix and run the three Composer verification commands above. Preserve both MySQL and PostgreSQL jobs because the PHP dependency resolution is only one half of runtime compatibility.
+Key `ses:send:{$accountKey}` must be scoped to the **SES account** (credentials+region), since `MaxSendRate` is per-account — different workspaces on different SES accounts get independent buckets.
+
+## Redis client / config that Horizon implies is available
+
+- `config/database.php` sets `'client' => env('REDIS_CLIENT', 'phpredis')`. In the committed `composer.lock`, `predis/predis` appears **only** as a `suggest`/`require-dev` of framework and Horizon — it is **not an installed runtime dependency**. Therefore the available client is **phpredis (ext-redis)**, which Horizon needs anyway.
+- Both the recommended `DurationLimiter` and the escalation token-bucket run over `Illuminate\Support\Facades\Redis` → `RedisManager` → **`PhpRedisConnection`**, so they are client-agnostic and work identically under phpredis.
+- Use the **`default` connection (DB 0)** — the one Horizon coordinates on — so limiter keys live in the same shared instance every worker already talks to. (The `cache` connection is DB 1; only use it if you deliberately want isolation.)
+- **PHP 8.4:** all classes are core framework 11.55.0, already exercised on PHP 8.4.23 by the live `:8.4` CI (per PROJECT.md). Facade resolution is standard container lookup — no PHP 8.4-specific concerns. `Redis` facade → binding `redis`; `RateLimiter` facade → singleton `Illuminate\Cache\RateLimiter`.
 
 ## Alternatives Considered
 
 | Recommended | Alternative | When to Use Alternative |
 |-------------|-------------|-------------------------|
-| Composer 2.10 native policy plus locked audit | Legacy `config.audit` plus `composer audit --locked` | Only while a controlled CI image cannot yet use Composer 2.10. Treat it as a migration bridge because current Composer documents `config.audit` as deprecated. |
-| Keep `mettle/sendportal-core` `^3.0` | Fork SendPortal Core to add an explicit `^8.4` branch | Only if a real PHP 8.4 runtime failure is reproduced and fixed upstream/downstream. Composer’s caret semantics mean a fork is not needed for the current PHP constraint alone. |
-| PHP 8.4 test matrix with locked installs | `config.platform.php` emulation | Use emulation only for an additional cross-target resolver check; it is not evidence that the actual PHP 8.4 runtime and extensions work. |
+| `Redis::throttle()` DurationLimiter | Custom Redis Lua token bucket | Only if the fixed-window boundary burst (see caveat) is observed to exceed SES `MaxSendRate` in production and smooth continuous-refill pacing is required |
+| `Redis::throttle()` DurationLimiter | `RateLimiter` facade (cache-based) | Only if you cannot use the Redis connection directly AND `cache.default` is a confirmed shared Redis store — but you lose built-in blocking and atomicity |
+| `Redis::throttle()` DurationLimiter | `RateLimitedWithRedis` job middleware | Only in a hypothetical world where the throttle point were a **host-owned queued Job** — it is not here (vendor Listener + vendor adapter), so this is unavailable under host-level-override-only |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `roave/security-advisories` `dev-master`, `dev-latest`, or an old pinned snapshot | The current metapackage blocks all Laravel 11 `illuminate/mail` versions; an old snapshot silently misses newer advisories. | Remove it; use Composer 2.10 `config.policy` and `composer audit --locked`. |
-| `--ignore-platform-reqs` or `--ignore-platform-req=php` | It forces an install that Composer has judged incompatible and hides a real runtime defect. | Resolve under PHP 8.4 and run `composer check-platform-reqs`. |
-| `config.platform.php: "8.3"` as the production workaround | It only lies to the solver; Composer docs warn that simulated platform values can install a graph that fails on the real platform. | Use the actual PHP 8.4 resolver. If a simulation is retained for another target, pair it with real-platform checks. |
-| `"platform-check": false` | Disables Composer’s generated startup protection for PHP/extensions. | Set `"platform-check": true` and test the production image. |
-| Lockfile-free installs or `composer update` in deployment | Each install can choose a different graph, defeating reproducibility and review. | Commit `composer.lock`; use `composer install` in CI and production. |
-
-## Stack Patterns by Variant
-
-**If Composer 2.10+ is available in CI (recommended):**
-
-- Use `config.policy` with advisory and abandoned package blocking, plus `composer audit --locked`.
-- Because it preserves security enforcement without a conflict-package whose rules make Laravel 11 unsatisfiable.
-
-**If a legacy Composer 2.x CI image cannot be upgraded immediately:**
-
-- Use `config.audit` settings and an explicit `composer audit --locked` as a short-lived bridge; document the removal date.
-- Because legacy Composer accepts `config.audit`, while native policy is the maintained replacement in Composer 2.10.
-
-**If PHP 8.2/8.3 remain supported deployments:**
-
-- Retain those jobs and add PHP 8.4 rather than replacing them; create the lockfile from PHP 8.4 but ensure all declared runtime targets satisfy it.
-- Because the root PHP requirement is intentionally compatible across the 8.2–8.x range below PHP 9.
+| Any new rate-limit Composer package (`symfony/rate-limiter`, `nikolaposa/rate-limit`, `spatie/laravel-rate-limited-job-middleware`, `graham-campbell/throttle`) | Redundant — `illuminate/redis` already provides an atomic cross-process limiter. New deps risk churning the carefully PHP-8.4-pinned lock (documented Symfony-8.1-floor tech debt) and violate "avoid new heavy deps" | `Redis::throttle()` |
+| `predis/predis` | Not installed; phpredis is the configured/available client | phpredis via `Illuminate\Support\Facades\Redis` |
+| In-memory / per-process limiters (array cache, APCu, static counters, `usleep` alone) | Do **not** coordinate across the ≤20 separate Horizon worker processes — each process would allow N/sec independently, giving up to 20×N total | Shared-Redis `DurationLimiter` |
+| `Cache::lock()` / `WithoutOverlapping` middleware as a "rate limiter" | These are **mutual exclusion** (one-at-a-time), not rate control — they do not enforce N-per-second | `Redis::throttle()->allow(N)->every(1)` |
+| Editing `vendor/mettle/sendportal-core` (adapter or `ThrottlesSending`) | Violates host-level-override-only; lost on `composer install` | Re-bind the SES adapter in `app/` and override `send()`/throttle wrapper |
+| Composer platform-check bypass / `--ignore-platform-reqs` | Explicit project constraint; conceals compatibility defects | Keep the pinned lock; add only host PHP code |
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| PHP `^8.2` (or current `^8.2|^8.3`) | PHP 8.4.x | Yes. Both expressions include all versions `>=8.2.0 <9.0.0`; the second branch is redundant. |
-| Laravel `^11.0` | PHP 8.4 | Yes, according to Laravel’s 11.x release policy. Laravel 11 security support ended 2026-03-12, so PHP compatibility does not remove the separate framework-upgrade risk. |
-| `mettle/sendportal-core` `^3.0` / v3.0.2 | PHP 8.4, Laravel 11 | Its PHP `^8.2|^8.3` and Illuminate Support `^10|^11` requirements permit this combination. Validate its provider integrations with the full test suite. |
-| `roave/security-advisories` current dev branch | Laravel 11 / `illuminate/mail` 11.x | No. Its `illuminate/mail >=9,<12.60` conflict range rejects Laravel 11 mail components. |
-| Composer 2.10+ native policy | Laravel 11 graph | Yes. It performs advisory policy and audit without installing a package that conflicts with Illuminate Mail. |
+| `laravel/framework` 11.55.0 | PHP 8.4.23 | Verified by committed lock + live `:8.4` CI; all limiter classes present under `vendor/laravel/framework/src/Illuminate/{Redis/Limiters,Cache}` |
+| `DurationLimiter` (Lua `EVAL`) | phpredis (ext-redis) | Runs over `PhpRedisConnection`; single-key script, no Redis-cluster cross-slot concern for one bucket key |
+| `laravel/horizon` (installed) | Redis DB 0 `default` | Limiter should share this connection; requires ext-redis/ext-pcntl/ext-posix already implied by Horizon |
+
+## Caveats the planner must carry forward
+
+1. **Fixed-window, not smooth token bucket.** `DurationLimiter` resets the count each `every(N)` window. With `every(1)`, up to `MaxSendRate` sends can fire near the end of window A and another full `MaxSendRate` at the start of window B — a transient ~2N burst across a sub-second boundary. For SES this is usually absorbed by SES's own per-second enforcement plus the existing retry/backoff (which SES-03/SES-04 harden). If observed to trip SES, escalate to the custom Lua token bucket. This is the single most important design trade-off for the roadmap.
+2. **`block()` default sleep is 750ms** — too coarse for a 1s window; set `->sleep(100)` (or 50–150ms) so blocked senders re-check promptly instead of idling most of a second. `block()` sleeps via `Illuminate\Support\Sleep`, so it is test-fakeable.
+3. **`block()` timeout throws `LimiterTimeoutException`.** Decide deliberately: on timeout, either fall through to the existing (soon-fixed) retry path or throw a clear exception — do **not** return `null` (that reproduces the SES-04 `TypeError`).
+4. **Stable, account-scoped key.** All processes must use the identical throttle name for a given SES account or coordination silently splits. Derive it from SES credentials+region, not per-request state.
 
 ## Sources
 
-- [PHP supported versions](https://www.php.net/supported-versions.php) — PHP 8.4 support dates; MEDIUM confidence (official primary source retrieved through verified web search).
-- [PHP 8.4 migration guide](https://www.php.net/migration84) — backward-incompatible-change and deprecation test requirement; MEDIUM confidence.
-- [Laravel 11 release notes](https://laravel.com/docs/11.x/releases) and [deployment requirements](https://laravel.com/docs/11.x/deployment) — PHP 8.2–8.4 compatibility, extension requirements, and Laravel 11 support dates; MEDIUM confidence.
-- [Composer version constraints](https://getcomposer.org/doc/articles/versions.md) — caret semantics; MEDIUM confidence.
-- [Composer configuration](https://getcomposer.org/doc/06-config.md) and [Composer CLI](https://getcomposer.org/doc/03-cli.md) — platform checks, lockfile validation, audit, and dependency policy; MEDIUM confidence.
-- [Composer 2.10 changelog](https://getcomposer.org/changelog/2.10.0-RC2) — introduction of the `policy` configuration; MEDIUM confidence.
-- [SendPortal Core package metadata](https://packagist.org/packages/mettle/sendportal-core) — v3.0.2 PHP and Illuminate Support constraints; MEDIUM confidence.
-- [Roave Security Advisories package metadata](https://packagist.org/packages/roave/security-advisories) — conflicting `illuminate/mail` range; MEDIUM confidence.
+- `vendor/laravel/framework/src/Illuminate/Redis/Limiters/DurationLimiter.php` and `DurationLimiterBuilder.php` (installed 11.55.0) — verified `allow/every/block/sleep/then`, `secondsUntil` (whole-second window), atomic Lua `EVAL`, `LimiterTimeoutException`, 750ms default sleep — HIGH
+- `vendor/laravel/framework/src/Illuminate/Cache/RateLimiter.php` (installed) — verified `attempt($key,$max,$cb,$decaySeconds=60)` cache-store based, signals-not-blocks — HIGH
+- `vendor/laravel/framework/src/Illuminate/Queue/Middleware/{RateLimited,RateLimitedWithRedis,WithoutOverlapping,ThrottlesExceptionsWithRedis}.php` (installed) — confirm job-boundary-only, release-not-pace — HIGH
+- `config/database.php`, `config/horizon.php` (repo) — `REDIS_CLIENT=phpredis` default; supervisor-2 `sendportal-message-dispatch` `maxProcesses=20`, `tries=3`; Horizon on `default` connection — HIGH
+- `composer.lock` (repo) — `predis/predis` only in suggest/require-dev → phpredis is the runtime client — HIGH
+- `vendor/mettle/sendportal-core/src/Adapters/SesMailAdapter.php`, `src/Traits/ThrottlesSending.php` (repo) — throttle seam is an inline adapter method, not a Job; confirms job-middleware options are unreachable under host-level-override-only — HIGH
 
 ---
-*Stack research for: SendPortal PHP 8.4 compatibility*
-*Researched: 2026-07-22*
+*Stack research for: coordinated cross-process SES send rate limiting (v1.1)*
+*Researched: 2026-07-25*

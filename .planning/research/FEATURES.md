@@ -1,113 +1,165 @@
 # Feature Research
 
-**Domain:** Production PHP 8.4 runtime compatibility and Composer installation reliability for an existing Laravel 11 application
-**Researched:** 2026-07-22
-**Confidence:** MEDIUM
+**Domain:** Amazon SES per-second send-rate reliability (Laravel/Horizon email dispatch)
+**Researched:** 2026-07-25
+**Confidence:** HIGH (AWS-doc-backed; one v2 error-code detail MEDIUM)
+
+> Scope reminder: This milestone (v1.1) adds **only** proactive pacing to the SES **per-second** `MaxSendRate` plus two throttle-path bug fixes. The existing **daily** `Max24HourSend` pre-check (`QuotaService::exceedsSesQuota`, wired into `CampaignDispatchController`) is correct and stays as-is — it is **not** re-scoped here.
+
+---
+
+## AWS Technical Reference (authoritative — planner must build against these)
+
+### `GetSendQuota` response fields (SES v1 — `Aws\Ses\SesClient::getSendQuota()`)
+
+| Field | Type | Meaning | Notes for pacing |
+|-------|------|---------|------------------|
+| `Max24HourSend` | double | Max emails allowed per **rolling** 24h window. | `-1` = **unlimited** (already handled by `QuotaService`). Rolling, not calendar-day. |
+| `MaxSendRate` | double | Max emails/sec SES **accepts** from the account. | **This milestone's target.** Is a **double — can be fractional** (sandbox is `1.0`; production commonly `14.0`, `50.0`, `200.0`…). SES lets you **burst briefly** above it but not **sustain** it. Actual accepted rate may be lower than the max. |
+| `SentLast24Hours` | double | Emails sent in the previous 24h. | Used by the existing daily pre-check only. |
+
+- Same three fields exist identically in **SESv2** (`API_SendQuota`), so the field contract is stable across API versions.
+- **No `-1` semantics apply to `MaxSendRate`** in practice — it is a positive rate for any active account. Treat a missing/zero/absent `MaxSendRate` as a fetch failure (fall back conservatively), mirroring how `QuotaService` logs and bails when `getSendQuota()` returns empty.
+
+### Throttling error — the single most important planning fact
+
+SES v1 (`sendEmail`) throws `Aws\Ses\Exception\SesException`. **Two different limit conditions share the exact same AWS error code `Throttling`**, distinguished only by message text:
+
+| Condition | `getAwsErrorCode()` | Message text | Retriable? | Reached in this app? |
+|-----------|--------------------|--------------|-----------|----------------------|
+| **Per-second rate exceeded** | `Throttling` | `Maximum sending rate exceeded` | **Yes** — transient; wait + retry succeeds | The condition this milestone paces away |
+| **Daily 24h quota exceeded** | `Throttling` | `Daily message quota exceeded` | **No** (short-term) — SES **drops** the message, wait ~24h | Pre-empted by the existing daily pre-check; rare race only |
+
+- **Implication for SES-03:** detecting on `getAwsErrorCode() === 'Throttling'` (instead of exact message-string match) is the right robustness fix — **but the code alone does not distinguish rate-exceeded from daily-quota-exceeded.** The planner must decide consciously (see Anti-Features + Dependency Notes). Because daily quota is already pre-checked, treating `Throttling` as a retriable rate-throttle is acceptable; on the rare daily-quota race the retries simply exhaust and surface an exception (which is the desired SES-04 behavior anyway).
+- SMTP interface renders the same as `454 Throttling failure: <message>` (not relevant — the adapter uses the API, not SMTP).
+- **Sandbox limits are a different failure class**, not `Throttling`: sending to an unverified recipient in sandbox returns `MessageRejected` ("Email address is not verified"). Sandbox does impose `MaxSendRate = 1.0` and `Max24HourSend = 200`, so exceeding the sandbox **rate** still yields the normal `Throttling` / "Maximum sending rate exceeded" — i.e. pacing to `MaxSendRate` transparently respects sandbox too.
+
+### v1 (`SesClient`) vs v2 (`SesV2Client`) — we stay on v1
+
+| Aspect | SES v1 (`SesClient`, this app) | SESv2 (`SesV2Client`) |
+|--------|-------------------------------|-----------------------|
+| GetSendQuota fields | `Max24HourSend`/`MaxSendRate`/`SentLast24Hours` | **Identical** field names/semantics |
+| Throttle error code | `Throttling` (message "Maximum sending rate exceeded") | `TooManyRequestsException` (HTTP 429) — **different code** [MEDIUM confidence] |
+| Exception class | `Aws\Ses\Exception\SesException` | `Aws\SesV2\Exception\SesV2Exception` |
+
+**Decision:** the vendor adapter (`SesMailAdapter`) uses `SesClient` (v1), so `Throttling` is the authoritative code to detect. Do **not** switch API versions — that would be scope creep and would change the error-code contract.
+
+### `MaxSendRate` stability & caching (~5 min) — verdict: SAFE to cache
+
+- AWS **auto-ramps** sending limits upward as account reputation builds; increases happen on the order of **hours/days**, never per-second. Decreases are rare and operator/AWS-initiated.
+- A 5-minute cache therefore risks at most: (a) briefly pacing slightly **under** a freshly-raised limit — safe, self-corrects next fetch; (b) briefly pacing slightly **over** a freshly-lowered limit — covered by the reactive `Throttling` backoff that remains as a safety net.
+- **Conclusion:** cache `MaxSendRate` ~5 min (per SES-02). No config override needed; the live value is the source of truth. Cache the whole `getSendQuota()` result to also serve the existing daily pre-check without a second API call.
+
+---
 
 ## Feature Landscape
 
-This milestone delivers an operational compatibility contract, not user-facing functionality. The word “feature” below means a verifiable upgrade capability that an operator, deployer, or maintainer relies on.
+### Table Stakes (required for a "reliable SES sender")
 
-### Table Stakes (Operators Expect These)
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Proactive per-second pacing to `MaxSendRate`** (SES-01) | A well-behaved sender stays under its accepted rate so SES near-never returns `Throttling`; reactive-only backoff wastes worker time and risks message loss. | HIGH | Must be **coordinated across all Horizon workers** (≤20 procs) — a per-process limiter lets N workers each send at the full rate → N× overshoot. Needs a shared/Redis-backed token/rate primitive. |
+| **Source rate live from `getSendQuota()['MaxSendRate']`, cached ~5 min** (SES-02) | Hard-coding or config-overriding the rate drifts from the account's real (auto-ramped) limit. | LOW–MEDIUM | Reuse the existing adapter `getSendQuota()`; cache result (Redis) ~5 min; conservative fallback if fetch fails. |
+| **Detect throttle by AWS error code `Throttling`** (SES-03) | Exact message-string match (`== 'Maximum sending rate exceeded.'`) is brittle — punctuation/wording drift silently breaks throttle handling and rethrows a retriable error. | LOW | Switch to `SesException::getAwsErrorCode() === 'Throttling'`. See daily-quota overlap caveat above. |
+| **Fail with a clear exception on retry exhaustion** (SES-04) | Current loop falls through and returns `null`; `send(): string` then throws an opaque `TypeError` instead of a meaningful failure the queue can retry. | LOW | After N attempts, `throw` a descriptive exception; let Horizon's job retry/backoff handle redelivery. |
+| **No dropped or duplicated messages under throttling** | Core correctness expectation of any mail sender. | (property of above) | Pacing + clean exception + queue retry must not double-send or silently drop. Verify idempotency of the retry path. |
+| **Preserve existing daily-quota pre-check unchanged** | It is correct and prevents the non-retriable daily `Throttling` case entirely. | NONE (leave as-is) | Explicitly out of rescope; just don't regress it. |
+| **No editing of `vendor/mettle/sendportal-core`** | Milestone constraint: host-level override only, upgrade-safe. | MEDIUM | Override the adapter/trait behavior from the host app (e.g. bind a host subclass / decorator) rather than patching vendor files. |
 
-| Feature | Why Expected | Complexity | Notes and concrete acceptance check |
-|---------|--------------|------------|-------------------------------------|
-| PHP 8.4 is an explicit supported Composer target | An install that rejects the target interpreter has not been upgraded. Laravel 11 itself lists PHP 8.2–8.4 as supported, but every root and transitive dependency must agree. | MEDIUM | Update the root PHP/package constraints only as needed for a PHP 8.4-resolvable graph. On a clean PHP 8.4 environment, `composer install --prefer-dist --no-interaction` exits 0 without `--ignore-platform-req` or `config.platform` pretending to be 8.4. `composer check-platform-reqs` passes against the actual target runtime. |
-| Reproducible dependency snapshot | This application is a deployable application, not a reusable library. Without `composer.lock`, every install is a fresh, time-dependent dependency resolution. | MEDIUM | Commit the generated `composer.lock`. From a fresh checkout, `composer install` uses the lock and exits 0; `composer validate --strict` reports a valid, in-sync manifest and lock. CI uses `install`, not a dependency-solving `update`. |
-| Compatible security safeguard | The current Roave advisory metapackage blocks the Laravel 11 graph; simply removing it without replacement weakens supply-chain protection. | MEDIUM | Remove or adjust only the conflicting mechanism, then retain a non-bypassed security check such as `composer audit`/Composer policy. The designated CI/security command exits 0 on the committed lockfile, and any exception is narrow, documented, and reviewable rather than a global disablement. |
-| PHP 8.4 application regression validation | Composer can solve a graph even when application boot, package discovery, or PHP 8.4 deprecations break real behavior. | MEDIUM | On PHP 8.4, install dependencies with normal scripts enabled, boot Laravel (`php artisan about` or an equivalent safe boot check), and run `vendor/bin/phpunit` successfully against both currently supported CI databases: MySQL and PostgreSQL. Treat new PHP 8.4 deprecations/errors in application paths as upgrade defects. |
-| PHP 8.4 is enforced in automation | Local success does not create a supported runtime unless the project continuously verifies it. | LOW | Update the CI matrix or equivalent CI job to run the lockfile install and suite under PHP 8.4 with the same database services. A pull request changing Composer files fails if install, validation, security check, boot, or tests fail on that runtime. |
+### Differentiators / Nice-to-have (defer unless cheap)
 
-### Differentiators (Reliability Beyond a One-Time Green Install)
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Log/metric line when pacing kicks in or rate is refreshed | Operator visibility into effective rate and throttle frequency. | LOW | Keep to a single info log at cache refresh + count of throttle retries — do not build a dashboard. Acceptable if trivial. |
+| Surface effective `MaxSendRate` in UI | Operator sees the live cap. | MEDIUM | **Feature creep for a focused fix** — defer. Not needed for reliability. |
+| Per-configuration-set / dedicated-IP-pool rate awareness | Fine-grained pacing for advanced setups. | HIGH | Out of scope; account-level `MaxSendRate` is the correct v1.1 granularity. |
+| Adaptive/dynamic backoff tuning | Marginally fewer retries. | MEDIUM | Existing exponential backoff (`resolveSleepDuration`) is adequate as a safety net; don't rewrite. |
 
-| Feature | Value Proposition | Complexity | Notes and concrete acceptance check |
-|---------|-------------------|------------|-------------------------------------|
-| Dependency-change guardrail | Makes the lockfile an ongoing reliability contract instead of a one-off artifact. | LOW | CI runs `composer validate --strict`; a manifest edit made without refreshing the lock causes the job to fail. Keep the normal install path lock-based and reserve `composer update` for an intentional, reviewed maintenance workflow. |
-| Core-package integration smoke coverage | The primary newsletter/campaign functionality comes from `mettle/sendportal-core`, while the existing suite concentrates on the host application. A small contract test catches upgrade regressions that host-only tests miss. | MEDIUM | Add or document a minimal automated smoke check that the core provider can boot and its expected route groups register, plus one representative safe integration path where fixtures permit it. It must run on PHP 8.4 and not introduce new product behavior. |
-| Upgrade evidence artifact | Turns an implicit environment claim into an auditable release record. | LOW | The pull request or CI summary records PHP/Composer versions, the locked package graph, command results for validation/audit/platform checks, and the MySQL/PostgreSQL PHPUnit outcomes. No credentials, tokens, or `.env` values are recorded. |
-| Focused deprecation triage | Avoids accepting a noisy upgrade that will become a hard break later, without turning this milestone into a broad refactor. | MEDIUM | Run the PHP 8.4 suite with normal error reporting, classify new deprecations by direct application code versus third-party code, and fix or constrain only blockers in scope. Any deferred third-party warning has a linked package/version and follow-up rationale. |
-
-### Anti-Features (Commonly Requested, Often Problematic)
+### Anti-Features (avoid — scope creep or incorrect)
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| `--ignore-platform-req` / `--ignore-platform-reqs` or disabling Composer platform checks | It makes a failing dependency solve appear successful quickly. | It hides PHP or extension incompatibilities and invalidates the claim that PHP 8.4 is supported. | Resolve or replace the actual conflicting constraints; prove the install on the real PHP 8.4 runtime with `composer check-platform-reqs`. |
-| Removing security checks to unblock Composer | It is the shortest route around the current Roave conflict. | It silently changes the project’s security posture and can permit known-vulnerable dependencies. | Retain Composer audit/policy or an equivalent CI safeguard, with narrow documented exceptions only when necessary. |
-| A solver-only “upgrade” | `composer update` may finish locally and look complete. | It neither freezes the result nor proves Laravel boot, scripts, extensions, or the existing database-backed application behavior. | Commit a lockfile, execute a clean lockfile install, boot Laravel, and run the current MySQL/PostgreSQL suite on PHP 8.4. |
-| Laravel 11 structural migration, auth/security repair, or UI cleanup bundled into this change | Compatibility work exposes legacy code and tempting adjacent improvements. | The project already has unrelated authorization and installer risks; mixing them with dependency changes inflates review and obscures the compatibility regression surface. | Keep fixes limited to PHP 8.4/Composer blockers. Capture unrelated issues for separately scoped milestones. |
-| New end-user functionality or broad package modernization | A dependency refresh can be framed as a product release. | It exceeds the milestone’s compatibility-and-installation objective and adds behavior that has no bearing on PHP 8.4 support. | Preserve existing behavior; add only test and CI coverage required to prove it survives the new runtime. |
-| Claiming universal PHP support | Supporting every PHP version seems future-proof. | It would conflict with Laravel 11’s documented runtime range and multiplies CI/maintenance obligations. | State PHP 8.4 as supported, retain only already-intended compatible versions, and make any future runtime expansion a separate decision. |
+| Retry **all** `Throttling` errors indefinitely | "Throttling is retriable" | Daily-quota-exceeded **also** carries code `Throttling` but is **not** short-term retriable — infinite/long retry burns workers and never succeeds. | Bounded attempts (existing 10-cap) → then throw (SES-04); rely on daily pre-check to keep the daily case out of the hot path. |
+| Making the rate a config/env override | "Let operators tune it" | Drifts from the account's real auto-ramped limit; invites over-sending and reputation damage. | Source live from `getSendQuota()`, cache ~5 min (SES-02). No override. |
+| Migrating to SESv2 (`SesV2Client`) for "modern" throttling | v2 is newer | Changes the error-code contract (`TooManyRequestsException`), breaks vendor-adapter parity, large blast radius for a focused fix. | Stay on v1; detect `Throttling`. |
+| Client-side sleeping inside the request thread as the *primary* control | Simple to add | Blocks a Horizon worker per message; doesn't coordinate across workers → still overshoots collectively. | Shared Redis rate limiter that gates before send; keep reactive sleep only as a fallback. |
+| Rebuilding/expanding the daily-quota check | "While we're in here" | Explicitly out of scope; the daily check is correct. | Leave `QuotaService` untouched. |
+| Rich metrics/dashboard/alerting for send rate | "Observability" | Non-trivial UI/infra work orthogonal to the reliability fix. | At most one log line; defer real observability. |
 
 ## Feature Dependencies
 
-```text
-Accurate PHP and package constraints
-    └──requires──> PHP 8.4-resolvable dependency graph
-                           └──requires──> committed composer.lock
-                                                   └──requires──> clean lockfile install
-                                                                       └──requires──> platform and Laravel boot checks
-                                                                                           └──requires──> PHP 8.4 CI suite on MySQL and PostgreSQL
+```
+SES-01 Coordinated pacing to MaxSendRate
+    └──requires──> SES-02 Live cached MaxSendRate source (need a value to pace to)
+    └──requires──> shared/Redis rate primitive (coordination across ≤20 workers)
 
-Compatible security safeguard ──must validate──> committed dependency graph
-Core-package smoke coverage ──enhances──> PHP 8.4 CI suite
-Platform-requirement bypass ──conflicts──> trustworthy PHP 8.4 support
-Unrelated refactors ──conflict with──> reviewable, focused compatibility delivery
+SES-04 Clean exception on retry exhaustion
+    └──requires──> SES-03 Code-based Throttling detection (must know it's a throttle before retry/exhaust)
+
+SES-01 (proactive pacing) ──reduces load on──> SES-03/SES-04 (reactive path becomes rare safety net)
+
+SES-03 code == 'Throttling' ──conflicts-with──> daily-quota case (same code, not short-retriable)
+      (mitigated by the preserved daily pre-check)
 ```
 
 ### Dependency Notes
 
-- **A real PHP 8.4 graph requires correct constraints:** a manifest that declares support but cannot resolve it is not an installable product.
-- **The lockfile requires a successful intended resolution first:** generate it after resolving the Roave/Laravel conflict, then validate it against the final manifest.
-- **Clean install precedes runtime validation:** package discovery and application boot use the installed locked graph, so test results are meaningful only after a normal install succeeds.
-- **Security validation depends on the final lockfile:** audit the exact packages operators will install, rather than a hypothetical range in `composer.json`.
-- **Core smoke coverage enhances, but does not replace, the suite:** it addresses the stated risk from the external `mettle/sendportal-core` package without expanding the product scope.
+- **SES-01 requires SES-02:** you cannot pace to a rate you haven't sourced; the cached `MaxSendRate` is the pacing target. Build SES-02 first (or together).
+- **SES-01 requires a shared coordination primitive:** Horizon runs multiple worker processes (config declares queues incl. `sendportal-message-dispatch`); a per-process limiter multiplies the send rate by the worker count. Redis-backed limiter is the correct mechanism.
+- **SES-04 requires SES-03:** the exhaustion-exception path lives inside the same throttle-handling logic that SES-03 rewrites; do them in the same unit of work (both live in `ThrottlesSending`).
+- **SES-03 vs daily-quota overlap:** documented above — same `Throttling` code. The preserved daily pre-check (`QuotaService`) is what makes code-only detection safe; call this out in the plan so it isn't "fixed" independently.
+- **Latent bug to note for SES-03:** the current match is `$e->getMessage() == 'Maximum sending rate exceeded.'` (trailing period). AWS documents the message as "Maximum sending rate exceeded" — an exact-string match is brittle regardless of the exact punctuation on the wire; this is concrete evidence for switching to code-based detection. (I did not byte-verify the live wire string; treat the period as a possible mismatch, not a confirmed one.)
 
 ## MVP Definition
 
-### Launch With (v1)
+### Launch With (v1.1)
 
-- [ ] A PHP 8.4-resolvable manifest and dependency graph — essential because it is the milestone’s stated operator outcome.
-- [ ] A committed, validated `composer.lock` and clean `composer install` path — essential for reproducible installation.
-- [ ] A retained, passing dependency security safeguard — essential because removing the conflicting advisory metapackage must not reduce security coverage.
-- [ ] PHP 8.4 Laravel boot plus the existing PHPUnit suite against MySQL and PostgreSQL — essential proof that existing behavior remains operational.
-- [ ] A PHP 8.4 CI job using the lockfile — essential to keep support from regressing immediately.
+- [ ] **SES-02** — live `MaxSendRate` sourced from `getSendQuota()`, cached ~5 min — everything paces to this.
+- [ ] **SES-01** — Redis-coordinated pacing to `MaxSendRate` across all workers — the core reliability outcome.
+- [ ] **SES-03** — detect throttle via `getAwsErrorCode() === 'Throttling'`, not message string.
+- [ ] **SES-04** — throw a clear exception on retry exhaustion (no `null` → `TypeError`); let queue retry.
+- [ ] Host-level override (no `vendor/` edits) covering the adapter/trait behavior.
 
 ### Add After Validation (v1.x)
 
-- [ ] Minimal SendPortal-core provider/route integration smoke coverage — add when fixtures and the final package graph make the highest-value contract test clear.
-- [ ] CI evidence summary / explicit dependency-update workflow — add once the baseline pipeline is green and maintainers need a repeatable maintenance cadence.
+- [ ] Minimal single-line log at rate-refresh + throttle-retry count — only if trivial.
 
 ### Future Consideration (v2+)
 
-- [ ] Static analysis and corrected application coverage configuration — valuable quality work, but not required to establish PHP 8.4 installation compatibility.
-- [ ] A broader Laravel application-structure migration — defer because it is explicitly unrelated to the focused runtime upgrade.
+- [ ] Per-configuration-set / dedicated-IP rate granularity — defer until account-level pacing proves insufficient.
+- [ ] Operator-facing UI showing effective send rate — defer; not a reliability requirement.
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| PHP 8.4-resolvable constraints and clean install | HIGH | MEDIUM | P1 |
-| Committed, validated lockfile | HIGH | LOW | P1 |
-| Security-check replacement/retention | HIGH | MEDIUM | P1 |
-| PHP 8.4 boot and MySQL/PostgreSQL test validation | HIGH | MEDIUM | P1 |
-| PHP 8.4 CI enforcement | HIGH | LOW | P1 |
-| Core-package smoke contract | HIGH | MEDIUM | P2 |
-| Upgrade evidence artifact | MEDIUM | LOW | P2 |
-| Static analysis / coverage repair | MEDIUM | MEDIUM | P3 |
+| SES-01 coordinated pacing | HIGH | HIGH | P1 |
+| SES-02 live cached rate | HIGH | LOW | P1 |
+| SES-03 code-based throttle detection | HIGH | LOW | P1 |
+| SES-04 clean exhaustion exception | HIGH | LOW | P1 |
+| Single info log line | LOW | LOW | P3 |
+| Rate in UI | LOW | MEDIUM | P3 |
+| SESv2 migration | LOW (negative) | HIGH | Do-not |
 
-**Priority key:** P1 = required for this compatibility release; P2 = hardens continued reliability after the baseline works; P3 = useful but outside this focused milestone.
+**Priority key:** P1 must have for this milestone · P2 should have · P3 defer.
+
+## Operator-visible "good" behavior (acceptance signal)
+
+- A campaign sends **steadily at ~`MaxSendRate`** (e.g. ~14/sec), not in a bursty spike-then-throttle sawtooth.
+- **Near-zero** `Throttling`/"Maximum sending rate exceeded" errors in logs (the reactive path is a rare safety net, not the norm).
+- Adding more Horizon workers does **not** increase the aggregate send rate beyond `MaxSendRate` (coordination proof).
+- **No dropped and no duplicated** messages; a genuinely failed send surfaces a clear exception and is retried by the queue, not swallowed as a `TypeError`.
 
 ## Sources
 
-- [Composer basic usage and lockfile guidance](https://getcomposer.org/doc/01-basic-usage.md) — MEDIUM confidence (official Composer documentation; verified through current web lookup).
-- [Composer command reference: validation and platform requirement flags](https://getcomposer.org/doc/03-cli.md) — MEDIUM confidence (official Composer documentation; verified through current web lookup).
-- [Composer configuration: platform checks and dependency security/abandonment policy](https://getcomposer.org/doc/06-config.md) — MEDIUM confidence (official Composer documentation; policy details can vary with Composer version).
-- [Composer platform dependencies](https://getcomposer.org/doc/articles/composer-platform-dependencies.md) — MEDIUM confidence (official Composer documentation; verified through current web lookup).
-- [Laravel 11 release notes and supported PHP versions](https://laravel.com/docs/11.x/releases) — MEDIUM confidence (official Laravel documentation; verified through current web lookup).
-- [Laravel 11 deployment requirements](https://laravel.com/docs/11.x/deployment) — MEDIUM confidence (official Laravel documentation; verified through current web lookup).
-- [PHP 8.4 release notes and compatibility changes](https://www.php.net/releases/8.4/en.php) — MEDIUM confidence (official PHP documentation; verified through current web lookup).
-- Project evidence: `.planning/PROJECT.md`, `.planning/codebase/TESTING.md`, and `.planning/codebase/CONCERNS.md` — HIGH confidence for repository-specific scope and test/CI observations.
+- [GetSendQuota — Amazon SES API Reference (v1)](https://docs.aws.amazon.com/ses/latest/APIReference/API_GetSendQuota.html) — field semantics, `-1` = unlimited — HIGH
+- [SendQuota — Amazon SES API Reference V2](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendQuota.html) — identical field contract across API versions — HIGH
+- [Errors related to the sending quotas for your Amazon SES account](https://docs.aws.amazon.com/ses/latest/dg/manage-sending-quotas-errors.html) — "Maximum sending rate exceeded" vs "Daily message quota exceeded", both under `Throttling`; 454 SMTP form — HIGH
+- [How to handle a "Throttling – Maximum sending rate exceeded" error (AWS Messaging Blog)](https://aws.amazon.com/blogs/messaging-and-targeting/how-to-handle-a-throttling-maximum-sending-rate-exceeded-error/) — retriable, back off up to 10 min, reduce concurrency/rate — HIGH
+- [Amazon SES email sending errors](https://docs.aws.amazon.com/ses/latest/dg/troubleshoot-error-messages.html) — error classification incl. sandbox `MessageRejected` — HIGH
+- [get_send_quota — Boto3 documentation](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ses/client/get_send_quota.html) — field types (double), rolling-window semantics — HIGH
+- Local vendor code: `vendor/mettle/sendportal-core/src/Traits/ThrottlesSending.php` (brittle string match `== 'Maximum sending rate exceeded.'`, `null`-return-after-10-attempts bug), `src/Services/QuotaService.php` (preserved daily pre-check, `-1` handling), `src/Adapters/SesMailAdapter.php` (`SesClient` v1, `getSendQuota()`, `send(): string`) — HIGH
 
 ---
-*Feature research for: SendPortal PHP 8.4 compatibility*
-*Researched: 2026-07-22*
+*Feature research for: Amazon SES per-second send-rate reliability*
+*Researched: 2026-07-25*
