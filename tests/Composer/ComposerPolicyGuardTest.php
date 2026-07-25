@@ -2964,12 +2964,6 @@ try {
         $streamingRoot,
         $streamingReleaseFile,
     );
-    fwrite(STDERR, 'DIAG streaming: '.json_encode([
-        'status' => $streamingResult['status'],
-        'observed_before_exit' => $streamingResult['observed_before_exit'],
-        'stdout' => $streamingResult['stdout'],
-        'stderr' => $streamingResult['stderr'],
-    ]).PHP_EOL);
     assertTrue($streamingResult['observed_before_exit'], 'Delegated stdout must be observable before the child exits.');
     assertTrue($streamingResult['status'] === 37, 'Delegation must preserve exact child status 37.');
     assertTrue($streamingResult['stdout'] === "delegated-stdout-before-exit\n", 'Delegated stdout must remain on stdout only.');
@@ -3033,6 +3027,18 @@ PHP;
             chmod($root.'/tools/composer/composer-2.10.2.phar', 0000);
         },
     ] as $scenario => $mutate) {
+        // The 'unreadable distribution' scenario relies on chmod(0000) making the
+        // phar unreadable. DAC permission bits do not restrict the superuser, so
+        // when the suite runs as root (GitHub Actions container jobs do) chmod(0000)
+        // cannot make the file unreadable and this fail-closed property is not
+        // exercisable — skip rather than assert a condition the OS cannot produce
+        // for uid 0. The 'missing distribution' scenario above still covers
+        // read-failure fail-closed behaviour for every uid.
+        if ($scenario === 'unreadable distribution'
+            && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            continue;
+        }
+
         $root = createTemporaryRepository($repositoryRoot);
         $temporaryRoots[] = $root;
         $trustedMarker = $root.'/trusted.marker';
