@@ -3914,11 +3914,11 @@ PHP;
     $productionRecords = auditRoutes($repositoryRoot);
     assertTrue(routeAuditFailures($productionRecords, true) === [], 'Production route audit must pass using only tracked records.');
     assertTrue(! (bool) array_filter($productionRecords, static fn (array $record): bool => str_contains($record['path'], 'sendportal-composer-route-')), 'Production route evidence must not include temporary fixture paths.');
-    assertTrue(count($productionRecords) === 6, 'Production route audit must retain exactly six tracked Composer records (3 baseline + 3 Phase-2 README docs: --no-dev deploy install and the Lockfile-review validate/audit commands).');
+    assertTrue(count($productionRecords) === 8, 'Production route audit must retain exactly eight tracked Composer records (the six baseline README/CI records plus the two Phase-3 CI gate commands added to .github/workflows/ci.yml: the guarded validate and audit steps).');
     $guardedProductionRecords = array_values(array_filter($productionRecords, static fn (array $record): bool => $record['classification'] === 'supported'
         && $record['executable'] === 'guard'
         && ($record['path'] === 'README.md' || str_starts_with($record['path'], '.github/workflows/'))));
-    assertTrue(count($guardedProductionRecords) === 6, 'Every one of the six production records must be guarded CI and README evidence (no un-guarded Composer route may enter tracked production files).');
+    assertTrue(count($guardedProductionRecords) === 8, 'Every one of the eight production records must be guarded CI and README evidence (no un-guarded Composer route may enter tracked production files).');
     // The dependency-free property (the audit reads only tracked source, never the lockfile or vendor tree)
     // is proven above: composer.lock is classified 'non-source' (routeSourceKind), the audit passes using
     // only tracked records, and no fixture paths leak in. The former on-disk absence precondition here was
