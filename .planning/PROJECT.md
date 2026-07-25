@@ -8,6 +8,15 @@ SendPortal is a self-hosted email-marketing application built as a Laravel 11 ho
 
 Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements.
 
+## Current Milestone: v1.1 SES Sending Reliability
+
+**Goal:** Campaign sending via Amazon SES is proactively paced to the account's per-second max send rate, coordinated across all Horizon queue workers, and the SES throttling path's two reliability bugs are fixed — all via a host-level override without editing `vendor/mettle/sendportal-core`.
+
+**Target features:**
+- Coordinated, Redis-backed rate limiter that paces SES sends to the account's `MaxSendRate` across all workers (≤20 processes).
+- Send rate sourced from SES `getSendQuota()['MaxSendRate']`, cached (~5 min), no config override.
+- Robust throttle handling: detect via AWS error code `Throttling`; on retry exhaustion fail with a clear exception (no `null`-return `TypeError`).
+
 ## Requirements
 
 ### Validated
@@ -23,7 +32,14 @@ Operators can install and run SendPortal reliably on PHP 8.4 without bypassing d
 
 ### Active
 
-_None — v1.0 shipped. Next milestone candidates staged from v2 requirements:_
+_Milestone v1.1 SES Sending Reliability (see `.planning/REQUIREMENTS.md`):_
+
+- [ ] SES-01: SES campaign sending is proactively paced to the account's per-second max send rate, coordinated across all queue workers.
+- [ ] SES-02: The per-second rate is sourced from SES `getSendQuota()['MaxSendRate']` and cached (~5 min).
+- [ ] SES-03: SES throttling is detected by AWS error code (`Throttling`), not by exact message-string match.
+- [ ] SES-04: When send retries are exhausted, sending fails with a clear exception (no `null`-return `TypeError`), letting the queue retry handle it.
+
+_Deferred to a later quality milestone (not v1.1):_
 
 - [ ] HARD-01: CI records a concise dependency-upgrade evidence summary (PHP/Composer versions, audit result, DB-matrix outcomes).
 - [ ] HARD-02: A minimal tenant-safe SendPortal Core behavior smoke test covers one representative package flow under PHP 8.4.
@@ -79,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-25 after v1.0 milestone*
+*Last updated: 2026-07-25 — started milestone v1.1 SES Sending Reliability*
