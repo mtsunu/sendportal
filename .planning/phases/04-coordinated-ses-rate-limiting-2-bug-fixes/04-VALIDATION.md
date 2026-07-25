@@ -45,11 +45,17 @@ automated test below.*
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 4-01-01 | 01 | 0 | SES-02 | — | MaxSendRate cached + edge values (-1/0/fractional/sandbox) handled | unit | `vendor/bin/phpunit --filter SesRate` | ❌ W0 | ⬜ pending |
-| 4-01-02 | 01 | 1 | SES-03 | — | `Throttling` rate retried; daily-quota fails fast; other errors propagate | unit | `vendor/bin/phpunit --filter Throttle` | ❌ W0 | ⬜ pending |
-| 4-01-03 | 01 | 1 | SES-04 | — | Exhaustion throws `SesSendThrottledException`, message not marked sent | unit | `vendor/bin/phpunit --filter Exhaust` | ❌ W0 | ⬜ pending |
-| 4-01-04 | 01 | 1 | SES-01 | — | Combined sends across ≥2 contexts never exceed MaxSendRate/sec (shared Redis) | integration | `vendor/bin/phpunit --filter CrossProcess` | ❌ W0 | ⬜ pending |
-| 4-01-05 | 01 | 1 | SES-05 | — | No double-send on interrupt between send and mark; rebind routes SES→ThrottledSesAdapter | integration | `vendor/bin/phpunit --filter DoubleSend` | ❌ W0 | ⬜ pending |
+| 4-01-01 | 01 | 1 | SES-01, SES-05 | T-04-01, T-04-05 | Tracer: factory returns ThrottledSesAdapter after boot AND one paced send succeeds end-to-end | integration | `vendor/bin/phpunit --filter Tracer` | ✅ | ⬜ pending |
+| 4-01-02 | 01 | 1 | SES-02 | T-04-03 | MaxSendRate cached (~5min, single-flight) + edge values (-1/0/fractional/sandbox) handled | unit | `vendor/bin/phpunit --filter SesRate` | ✅ | ⬜ pending |
+| 4-01-03 | 01 | 1 | SES-03 | T-04-04 | `Throttling` rate retried; daily-quota fails fast; non-Throttling propagates | unit | `vendor/bin/phpunit --filter Throttle` | ✅ | ⬜ pending |
+| 4-01-04 | 01 | 1 | SES-04 | T-04-02 | Exhaustion throws `SesSendThrottledException` (no null/TypeError), bounded attempts, message not marked sent | unit | `vendor/bin/phpunit --filter Exhaust` | ✅ | ⬜ pending |
+| 4-01-05 | 01 | 1 | SES-01 | T-04-01 | Combined sends across ≥2 shared-key contexts never exceed MaxSendRate/sec; store is Redis | integration | `vendor/bin/phpunit --filter CrossProcess` | ✅ | ⬜ pending |
+| 4-01-06 | 01 | 1 | SES-05 | T-04-05 | No double-send on interrupt between send and mark; wait strictly before send; rebind routes SES→ThrottledSesAdapter; vendor/composer untouched | integration | `vendor/bin/phpunit --filter DoubleSend` | ✅ | ⬜ pending |
+| 4-01-07 | 01 | 1 | SES-01..05 | — | Full suite green + php-cs-fixer clean; vendor/ and composer.* unchanged | gate | `vendor/bin/phpunit` | ✅ | ⬜ pending |
+
+*Wave 0 note: this phase is TDD — each task writes its failing test first, so the test files
+are created inside their owning task (no separate Wave 0). "File Exists ✅" means the task
+creates it as part of RED.*
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky. Task IDs are placeholders — the planner
 reconciles them with the final PLAN.md task breakdown.*

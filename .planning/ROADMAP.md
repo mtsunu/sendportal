@@ -34,7 +34,8 @@ Full details archived in `.planning/milestones/v1.0-ROADMAP.md`.
   3. Retry exhaustion surfaces a named exception (`SesSendThrottledException`), never a `TypeError` from a `null` return, and the affected message is not marked sent — Horizon (`tries=3`) is the single retry owner.
   4. Fault injection between the SES call and `markSent()` does not double-send: all waiting happens *before* the SES call and the block is bounded well below the worker timeout (`< 60s`).
   5. No `vendor/` files are changed and no new Composer dependency is added; `MaxSendRate` is sourced live from `getSendQuota()`, cached ~5 min with safe edge-value handling (`-1`/unlimited/`0`/fractional/sandbox `1.0`) and single-flight refresh; the existing `QuotaService` daily pre-check is unchanged.
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 04-01-PLAN.md — Coordinated SES rate limiting + 2 bug fixes: tracer-first ThrottledSesAdapter (host override, Redis DurationLimiter pacing, cached MaxSendRate, throttle-code sub-branch, named exhaustion exception) rebound via AppServiceProvider; full SES-01..05 test suite.
 
 **Build order** (internal to this phase, not separate phases):
 1. Config + quota sourcing — `config/sendportal-throttle.php`, cached `MaxSendRate` read (`md5(region|access-key-id)` key), edge-value guards, single-flight + last-known-good fallback (SES-02).
