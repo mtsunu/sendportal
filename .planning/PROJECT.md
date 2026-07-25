@@ -8,11 +8,27 @@ SendPortal is a self-hosted email-marketing application built as a Laravel 11 ho
 
 Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements.
 
+## Current Milestone: v1.2 Saved Sender Identities
+
+**Goal:** Operators can save a sender identity (label + From Name + From Email) once and reuse it via a dropdown when creating a campaign — instead of retyping it every time.
+
+**Target features:**
+- Per-workspace Sender entity: `label`, `from_name`, `from_email`
+- Sender management page: list / create / edit / delete (full CRUD)
+- Auto-capture: creating a campaign with a new From Name/Email also saves it as a reusable sender (deduplicated)
+- Sender dropdown on the campaign form that auto-fills From Name/Email (still editable), with no pre-selected default
+
+**Key constraints for this milestone:**
+- Minimal scope — a sender does NOT store the Email Service or a Reply-To address.
+- No "default sender" — selection is always manual via the dropdown.
+- Host/package boundary — the campaign form and controller live in `mettle/sendportal-core` (`vendor/`). Surfacing the dropdown and saved-sender data must be done by publishing/overriding the package campaign view and injecting via host seams, with ZERO `vendor/` edits — the same discipline as v1.1's `ThrottledSesAdapter`.
+- Sender values are copied onto each message at send time, so editing/deleting a sender must not retroactively change already-sent or in-flight campaigns.
+
 ## Current State
 
-**Shipped v1.1 SES Sending Reliability (2026-07-25).** No active milestone — ready to plan the next one via `/gsd-new-milestone`.
+**Milestone v1.2 Saved Sender Identities — planning (started 2026-07-25).** Defining requirements.
 
-Last two milestones both shipped 2026-07-25:
+Prior milestones (both shipped 2026-07-25):
 - **v1.0 PHP 8.4 Compatibility** — installable/operational on PHP 8.4; committed lock; live `:8.4` CI gate.
 - **v1.1 SES Sending Reliability** — coordinated per-second SES pacing + 2 throttle-path bug fixes via host-level `ThrottledSesAdapter` override; 5/5 requirements satisfied.
 
@@ -38,7 +54,7 @@ Last two milestones both shipped 2026-07-25:
 
 ### Active
 
-_No active milestone — plan the next one via `/gsd-new-milestone`._
+_Milestone v1.2 Saved Sender Identities — requirements tracked in `.planning/REQUIREMENTS.md` (SENDER-* IDs)._
 
 _Deferred to a future quality/reliability milestone:_
 
@@ -103,4 +119,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-25 after v1.1 milestone*
+*Last updated: 2026-07-25 — started v1.2 Saved Sender Identities milestone*

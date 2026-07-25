@@ -1,18 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: SES Sending Reliability
-status: Awaiting next milestone
-stopped_at: Completed 04-01-PLAN.md — SES-01..05 green vs real Redis; full DB suite + php-cs-fixer are CI-only env gaps
-last_updated: "2026-07-25T14:48:28.881Z"
+milestone: v1.2
+milestone_name: Saved Sender Identities
+status: planning
+last_updated: "2026-07-25T15:08:06.797Z"
 last_activity: 2026-07-25
-last_activity_desc: Milestone v1.1 completed and archived
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -26,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-25)
 
 ## Current Position
 
-Phase: Milestone v1.1 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-25 — Milestone v1.1 completed and archived
+Status: Defining requirements
+Last activity: 2026-07-25 — Milestone v1.2 started
 
 ## Performance Metrics
 
