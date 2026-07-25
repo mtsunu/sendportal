@@ -55,21 +55,21 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SENDER-01 | TBD | Pending |
-| SENDER-02 | TBD | Pending |
-| SENDER-03 | TBD | Pending |
-| SENDER-04 | TBD | Pending |
-| SENDER-05 | TBD | Pending |
-| SENDER-06 | TBD | Pending |
-| SENDER-07 | TBD | Pending |
-| SENDER-08 | TBD | Pending |
-| SENDER-09 | TBD | Pending |
+| SENDER-01 | Phase 5 | Pending |
+| SENDER-02 | Phase 5 | Pending |
+| SENDER-03 | Phase 5 | Pending |
+| SENDER-04 | Phase 5 | Pending |
+| SENDER-05 | Phase 5 | Pending |
+| SENDER-06 | Phase 6 | Pending |
+| SENDER-07 | Phase 7 | Pending |
+| SENDER-08 | Phase 6 | Pending |
+| SENDER-09 | Phase 7 | Pending |
 
 **Coverage:**
 - Milestone v1.2 requirements: 9 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 9 ⚠️ (roadmapper will map all)
+- Mapped to phases: 9/9 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-07-25*
-*Last updated: 2026-07-25 after initial definition*
+*Last updated: 2026-07-25 after roadmap creation (Phases 5-7 mapped, 9/9 coverage)*

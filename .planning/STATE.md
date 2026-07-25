@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-07-25T15:08:06.797Z"
 last_activity: 2026-07-25
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,15 +19,17 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-07-25)
 
-**Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.1: campaign delivery via Amazon SES respects the account's per-second sending limit automatically, coordinated across all workers.
-**Current focus:** None — v1.0 and v1.1 shipped 2026-07-25. Plan the next milestone with `/gsd-new-milestone`.
+**Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.2: operators save a sender identity once and reuse it via a dropdown when creating a campaign.
+**Current focus:** Phase 5 — Sender Identity Management (v1.2 Saved Sender Identities).
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-07-25 — Milestone v1.2 started
+Phase: 5 of 7 (Sender Identity Management)
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-07-25 — ROADMAP.md created: Phases 5-7 mapped, 9/9 SENDER requirements covered
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -79,6 +81,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - Phase 3: Preserve Laravel 11 and prove the unchanged SendPortal Core host integration on PHP 8.4.
 - [Phase ?]: Phase 4: SES pacing + 2 bug fixes shipped as host-level ThrottledSesAdapter (Redis DurationLimiter, code-gated throttle classifier, named SesSendThrottledException); no vendor edits, no new dependency.
 - [Phase ?]: Phase 4: cross-process SES-01 proof asserts M sends occupy >= ceil(M/R) aligned integer-second windows (pigeonhole, stable) instead of a flaky per-recorded-timestamp <=R count.
+- v1.2 Roadmap: Split into 3 phases — Phase 5 (Sender CRUD, SENDER-01/02/03/04/05), Phase 6 (campaign-form dropdown + zero-vendor-edit delivery, SENDER-06/08), Phase 7 (auto-capture + data integrity, SENDER-07/09) — each an independently shippable increment of user value.
+- v1.2 Roadmap: Phase 7's auto-capture hook (Campaign model observer given `$guarded = []`, vs. a host wrapper) is explicitly left as a plan-time decision, not fixed at roadmap level.
 
 ### Pending Todos
 
@@ -88,6 +92,7 @@ None yet.
 
 - v1.1 Phase 4: Fixed-window edge burst — `DurationLimiter` may permit ~2N across a sub-second boundary. Ship the simple limiter; token-bucket escalation (SES-06) is deferred unless SES throttling is observed in production.
 - v1.1 Phase 4: App-level idempotency beyond `sent_at` (SES-07) is an open design call — the block-before-send invariant + 15s bound is the minimum mitigation; decide during Phase 4 planning.
+- v1.2 Phase 6/7: Vendor boundary is HARD (SENDER-08, zero `vendor/mettle/sendportal-core` edits) — dropdown surfacing requires publishing/overriding the campaign form view; auto-capture (SENDER-07) requires a host seam into campaign creation (Campaign model observer or host wrapper) since the controller is package-owned. Resolve the exact seam during Phase 6/7 planning.
 
 ## Deferred Items
 
@@ -110,10 +115,10 @@ Environment-only checks from `04-VERIFICATION.md` (`human_needed`) — accepted 
 
 ## Session Continuity
 
-Last session: 2026-07-25T13:20:04.587Z
-Stopped at: Completed 04-01-PLAN.md — SES-01..05 green vs real Redis; full DB suite + php-cs-fixer are CI-only env gaps
+Last session: 2026-07-25T15:08:06.797Z
+Stopped at: ROADMAP.md created for v1.2 — Phases 5-7 defined, REQUIREMENTS.md traceability updated (9/9 mapped)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 5 (Sender Identity Management) with /gsd-plan-phase 5
