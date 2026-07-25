@@ -40,6 +40,17 @@ final class ThrottledSesAdapter extends SesMailAdapter
     public const CLASSIFY_PROPAGATE = 'propagate';
 
     /**
+     * The Horizon worker timeout (config/horizon.php: sendportal-message-dispatch
+     * has no explicit worker timeout, so the 60s default applies). The aggregate
+     * in-send wait budget MUST stay below this so a slow send never triggers a
+     * duplicate reservation (SES-05).
+     */
+    public const WORKER_TIMEOUT_SECONDS = 60;
+
+    /** Guards the config-clamp warning so it is logged at most once per process. */
+    private static bool $clampWarned = false;
+
+    /**
      * Inject a pre-built (mocked) SES client. The factory instantiates adapters
      * with `new` (no container DI), so this is the seam tests use.
      */
@@ -58,11 +69,44 @@ final class ThrottledSesAdapter extends SesMailAdapter
         $payload = $this->buildPayload($fromEmail, $fromName, $toEmail, $subject, $content);
         $rate = $this->resolveSendRate();
 
-        if ($rate === self::RATE_UNLIMITED) {
-            return $this->resolveMessageId($this->resolveClient()->sendEmail($payload));
+        // ONE shared wall-clock deadline: every Redis block AND every reactive
+        // backoff draws from this single budget, so the aggregate in-send wait can
+        // never exceed max_total_wait_seconds regardless of how max_send_attempts or
+        // max_block_seconds are tuned (SES-05).
+        $deadline = microtime(true) + $this->maxTotalWaitSeconds();
+
+        $attempt = $rate === self::RATE_UNLIMITED
+            ? fn (): string => $this->resolveMessageId($this->resolveClient()->sendEmail($payload))
+            : fn (): string => $this->pacedSesCall($rate, $payload, $deadline);
+
+        return $this->runWithRetries($attempt, $deadline);
+    }
+
+    /**
+     * The effective aggregate in-send wait budget in seconds.
+     *
+     * Config guard (SES-05): a value >= the 60s worker timeout is clamped down (and
+     * warned once) so the configured values can never sum past the worker timeout.
+     */
+    public function maxTotalWaitSeconds(): int
+    {
+        $configured = (int) config('sendportal-throttle.max_total_wait_seconds', 45);
+
+        if ($configured >= self::WORKER_TIMEOUT_SECONDS) {
+            if (! self::$clampWarned) {
+                self::$clampWarned = true;
+                Log::warning(sprintf(
+                    'sendportal-throttle.max_total_wait_seconds (%d) must be < %ds worker timeout; clamping to %d.',
+                    $configured,
+                    self::WORKER_TIMEOUT_SECONDS,
+                    self::WORKER_TIMEOUT_SECONDS - 1
+                ));
+            }
+
+            return self::WORKER_TIMEOUT_SECONDS - 1;
         }
 
-        return $this->paceAndSend($rate, $payload);
+        return max(1, $configured);
     }
 
     /**
@@ -123,17 +167,61 @@ final class ThrottledSesAdapter extends SesMailAdapter
     }
 
     /**
-     * Pace one send through the shared Redis DurationLimiter, then issue the SES
-     * call inside the acquired 1-second window and resolve the message id.
+     * Run a single send attempt inside a bounded reactive retry loop (SES-04).
+     *
+     * On a RATE-classified SesException the send is retried up to max_send_attempts
+     * times with a backoff drawn from the shared deadline. DAILY_QUOTA fails fast and
+     * any other SesException propagates unchanged. On exhaustion (attempts or the
+     * shared deadline) a named SesSendThrottledException is thrown — never null, so
+     * the string return type can never TypeError. A Redis block-timeout surfaces as
+     * the same SesSendThrottledException from pacedSesCall() and is not retried.
      */
-    protected function paceAndSend(int $rate, array $payload): string
+    protected function runWithRetries(callable $attempt, float $deadline): string
+    {
+        $maxAttempts = max(1, (int) config('sendportal-throttle.max_send_attempts', 3));
+        $backoffMs = (int) config('sendportal-throttle.reactive_backoff_ms', 200);
+        $attempts = 0;
+
+        while (true) {
+            $attempts++;
+
+            try {
+                return $attempt();
+            } catch (SesException $e) {
+                if ($this->classifyThrottleException($e) !== self::CLASSIFY_RATE) {
+                    throw $e; // DAILY_QUOTA fail-fast; PROPAGATE unchanged
+                }
+
+                if ($attempts >= $maxAttempts || microtime(true) >= $deadline) {
+                    throw new SesSendThrottledException(
+                        sprintf(
+                            'SES send throttled after %d attempt(s) on key %s.',
+                            $attempts,
+                            $this->throttleKeyHash()
+                        ),
+                        0,
+                        $e
+                    );
+                }
+
+                $this->reactiveBackoff($backoffMs, $deadline);
+            }
+        }
+    }
+
+    /**
+     * Pace one send through the shared Redis DurationLimiter, then issue the SES
+     * call inside the acquired 1-second window and resolve the message id. The block
+     * cap is drawn from the shared deadline so it never exceeds the remaining budget.
+     */
+    protected function pacedSesCall(int $rate, array $payload, float $deadline): string
     {
         $key = 'sp:ses:rate:' . $this->throttleKeyHash();
 
         return Redis::throttle($key)
             ->allow($rate)
             ->every(1)
-            ->block((int) config('sendportal-throttle.max_block_seconds', 15))
+            ->block($this->currentBlockCap($deadline))
             ->sleep((int) config('sendportal-throttle.block_sleep_ms', 100))
             ->then(
                 fn (): string => $this->resolveMessageId($this->resolveClient()->sendEmail($payload)),
@@ -143,6 +231,33 @@ final class ThrottledSesAdapter extends SesMailAdapter
                     );
                 }
             );
+    }
+
+    /**
+     * The per-attempt Redis block cap: min(max_block_seconds, remaining budget),
+     * never negative. When the budget is spent this is 0, so the limiter times out
+     * immediately rather than pushing the aggregate wait past the deadline.
+     */
+    protected function currentBlockCap(float $deadline): int
+    {
+        $configured = (int) config('sendportal-throttle.max_block_seconds', 15);
+        $remaining = (int) floor($deadline - microtime(true));
+
+        return max(0, min($configured, $remaining));
+    }
+
+    /**
+     * Sleep between FAILED rate-classified attempts, capped by the remaining shared
+     * budget so cumulative backoffs can never exceed the deadline.
+     */
+    protected function reactiveBackoff(int $backoffMs, float $deadline): void
+    {
+        $remainingMs = (int) max(0, floor(($deadline - microtime(true)) * 1000));
+        $sleepMs = min($backoffMs, $remainingMs);
+
+        if ($sleepMs > 0) {
+            usleep($sleepMs * 1000);
+        }
     }
 
     /**
