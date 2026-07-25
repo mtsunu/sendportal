@@ -2,10 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: SES Sending Reliability
-status: verifying
+status: Awaiting next milestone
 stopped_at: Completed 04-01-PLAN.md — SES-01..05 green vs real Redis; full DB suite + php-cs-fixer are CI-only env gaps
-last_updated: "2026-07-25T13:20:04.593Z"
+last_updated: "2026-07-25T14:48:28.881Z"
 last_activity: 2026-07-25
+last_activity_desc: Milestone v1.1 completed and archived
 progress:
   total_phases: 1
   completed_phases: 1
@@ -21,14 +22,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-25)
 
 **Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.1: campaign delivery via Amazon SES respects the account's per-second sending limit automatically, coordinated across all workers.
-**Current focus:** Phase 04 — coordinated-ses-rate-limiting-2-bug-fixes
+**Current focus:** None — v1.0 and v1.1 shipped 2026-07-25. Plan the next milestone with `/gsd-new-milestone`.
 
 ## Current Position
 
-Phase: 04 (coordinated-ses-rate-limiting-2-bug-fixes) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-07-25
+Phase: Milestone v1.1 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-25 — Milestone v1.1 completed and archived
 
 ## Performance Metrics
 
@@ -99,6 +100,16 @@ None yet.
 | SES reliability | Custom Redis-Lua token-bucket limiter (SES-06) | Future — only if fixed-window trips SES | 2026-07-25 |
 | SES reliability | App-level idempotency marker beyond `sent_at` (SES-07) | Future — unless SES-05 fault-injection proves the bounded block insufficient | 2026-07-25 |
 
+### v1.1 verification overrides (acknowledged at milestone close on 2026-07-25)
+
+Environment-only checks from `04-VERIFICATION.md` (`human_needed`) — accepted as deferred to CI/prod; not code gaps.
+
+| Category | Item | Status |
+|----------|------|--------|
+| verification | Full DB-backed PHPUnit suite (37 pre-existing Auth/Invitations/Setup/Workspaces tests) — needs CI MySQL (`sendportal_testing`) | human_needed — deferred to CI |
+| verification | php-cs-fixer PSR-12 gate on `app/Mail`, `config/sendportal-throttle.php`, `tests/Feature/Ses` — needs CI Docker image | human_needed — deferred to CI (`php -l` + manual PSR-12 review passed) |
+| verification | Live-SES pacing under real campaign volume (SES-01 CloudWatch check) — needs live AWS SES credentials | human_needed — deferred to prod |
+
 ## Session Continuity
 
 Last session: 2026-07-25T13:20:04.587Z
@@ -107,4 +118,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 4 with `/gsd-plan-phase 4`
+- Start the next milestone with /gsd-new-milestone

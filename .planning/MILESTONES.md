@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.1 SES Sending Reliability (Shipped: 2026-07-25)
+
+**Phases completed:** 1 phase, 1 plan, 7 tasks
+**Delivered:** Coordinated, Redis-backed per-second SES send pacing across all Horizon workers, plus fixes for the throttle-code misclassification and `null`-return `TypeError` — as a host-level `ThrottledSesAdapter` override (no `vendor/` edits, no new dependency). All 5 requirements (SES-01..05) satisfied; 26 SES tests + 1 Unit test green against live Redis.
+**Requirements:** 5/5 v1.1 requirements complete (SES-01..05).
+**Git range:** `c1b35fe` → `21c7414` (11 commits, TDD red/green) · +1,492/−27 across 16 files.
+
+**Key accomplishments:**
+
+- Cross-process SES per-second pacing plus the two throttle-path bug fixes shipped entirely as a host-level `ThrottledSesAdapter` (Redis `DurationLimiter`, code-gated throttle classifier, named exhaustion exception) with zero `vendor/` edits and no new Composer dependency.
+
+**Closeout type:** override_closeout — Phase 04 verification is `human_needed` (VERIFIED-WITH-CAVEATS, 5/5 criteria). Known verification overrides: 3 (all environment-only, see STATE.md Deferred Items):
+1. Full DB-backed PHPUnit suite (37 pre-existing tests) — needs CI MySQL; ERRORs locally on `Access denied` only, not code.
+2. php-cs-fixer PSR-12 gate — needs CI Docker image; `php -l` passes, manual PSR-12 review done.
+3. Live-SES pacing under real volume (SES-01 CloudWatch check) — needs live AWS SES credentials.
+
+---
+
 ## v1.0 PHP 8.4 Compatibility (Shipped: 2026-07-25)
 
 **Phases completed:** 3 phases, 15 plans, 27 tasks
