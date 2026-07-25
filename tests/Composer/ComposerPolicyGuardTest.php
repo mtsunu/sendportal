@@ -2796,9 +2796,9 @@ function initializeFixtureRepositoryFiles(string $sourceRoot, array $files): str
     }
 
     $result = runCommand(['git', 'init', '--quiet'], getenv(), $fixtureRoot);
-    assertTrue($result['status'] === 0, "Could not initialize the route-audit fixture repository: {$result['stderr']}");
+    assertTrue($result['status'] === 0, "Could not initialize the route-audit fixture repository (status={$result['status']} stdout={$result['stdout']} stderr={$result['stderr']}).");
     $result = runCommand(['git', 'add', 'bin/composer-policy', 'tools/composer/ComposerPolicyCommandContract.php', ...array_keys($files)], getenv(), $fixtureRoot);
-    assertTrue($result['status'] === 0, "Could not stage the route-audit fixture repository: {$result['stderr']}");
+    assertTrue($result['status'] === 0, "Could not stage the route-audit fixture repository (status={$result['status']} stdout={$result['stdout']} stderr={$result['stderr']}).");
 
     return $fixtureRoot;
 }
