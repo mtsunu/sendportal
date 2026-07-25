@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Constraint Resolution and Security Control** - Establish an honest PHP 8.2–8.4 Composer contract and a compatible dependency-security safeguard. ✓ Verified passed 2026-07-24 (7/7 truths).
 - [x] **Phase 2: Reproducible Dependency Snapshot** - Freeze the approved PHP 8.4 graph into a reviewed lockfile and make it the standard installation contract. (completed 2026-07-24)
-- [ ] **Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification** - Prove the locked application boots and its existing test matrix continues to work under PHP 8.4.
+- [x] **Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification** - Prove the locked application boots and its existing test matrix continues to work under PHP 8.4. (completed 2026-07-25)
 
 ## Phase Details
 
@@ -94,7 +94,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Add PHP 8.4 CI matrix job with script-enabled install, Laravel boot + SendPortal Core route-registration proof, and full Composer metadata/platform/audit gating (RUNTIME-01..04, CI-01, CI-02).
+- [x] 03-01-PLAN.md — Add PHP 8.4 CI matrix job with script-enabled install, Laravel boot + SendPortal Core route-registration proof, and full Composer metadata/platform/audit gating (RUNTIME-01..04, CI-01, CI-02).
 
 ## Progress
 
@@ -105,4 +105,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Constraint Resolution and Security Control | 7/7 | Complete | 2026-07-24 |
 | 2. Reproducible Dependency Snapshot | 2/2 | Complete   | 2026-07-24 |
-| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/1 | Not started | - |
+| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 1/1 | Complete   | 2026-07-25 |

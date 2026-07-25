@@ -20,15 +20,15 @@
 
 ### Runtime Validation
 
-- [ ] **RUNTIME-01**: A normal, script-enabled lockfile install completes Laravel package discovery and a safe Laravel boot check on PHP 8.4.
-- [ ] **RUNTIME-02**: The existing PHPUnit suite passes on PHP 8.4 against MySQL.
-- [ ] **RUNTIME-03**: The existing PHPUnit suite passes on PHP 8.4 against PostgreSQL.
-- [ ] **RUNTIME-04**: PHP 8.4 validation proves that the existing SendPortal Core provider and route-registration integration still boots without changing product behavior.
+- [x] **RUNTIME-01**: A normal, script-enabled lockfile install completes Laravel package discovery and a safe Laravel boot check on PHP 8.4.
+- [x] **RUNTIME-02**: The existing PHPUnit suite passes on PHP 8.4 against MySQL.
+- [x] **RUNTIME-03**: The existing PHPUnit suite passes on PHP 8.4 against PostgreSQL.
+- [x] **RUNTIME-04**: PHP 8.4 validation proves that the existing SendPortal Core provider and route-registration integration still boots without changing product behavior.
 
 ### Continuous Integration
 
-- [ ] **CI-01**: CI includes a PHP 8.4 job using the committed lockfile and retains the existing supported PHP 8.2 and 8.3 coverage.
-- [ ] **CI-02**: The PHP 8.4 CI job fails on invalid Composer metadata, platform requirement failures, dependency audit failures, Laravel boot failures, or PHPUnit failures for either database engine.
+- [x] **CI-01**: CI includes a PHP 8.4 job using the committed lockfile and retains the existing supported PHP 8.2 and 8.3 coverage.
+- [x] **CI-02**: The PHP 8.4 CI job fails on invalid Composer metadata, platform requirement failures, dependency audit failures, Laravel boot failures, or PHPUnit failures for either database engine.
 
 ## v2 Requirements
 
@@ -58,12 +58,12 @@
 | DEPS-02 | Phase 2 | Complete |
 | DEPS-03 | Phase 2 | Complete |
 | DEPS-04 | Phase 2 | Complete |
-| RUNTIME-01 | Phase 3 | Pending |
-| RUNTIME-02 | Phase 3 | Pending |
-| RUNTIME-03 | Phase 3 | Pending |
-| RUNTIME-04 | Phase 3 | Pending |
-| CI-01 | Phase 3 | Pending |
-| CI-02 | Phase 3 | Pending |
+| RUNTIME-01 | Phase 3 | Complete |
+| RUNTIME-02 | Phase 3 | Complete |
+| RUNTIME-03 | Phase 3 | Complete |
+| RUNTIME-04 | Phase 3 | Complete |
+| CI-01 | Phase 3 | Complete |
+| CI-02 | Phase 3 | Complete |
 
 **Coverage:**
 
