@@ -2962,6 +2962,12 @@ try {
         $streamingRoot,
         $streamingReleaseFile,
     );
+    fwrite(STDERR, 'DIAG streaming: '.json_encode([
+        'status' => $streamingResult['status'],
+        'observed_before_exit' => $streamingResult['observed_before_exit'],
+        'stdout' => $streamingResult['stdout'],
+        'stderr' => $streamingResult['stderr'],
+    ]).PHP_EOL);
     assertTrue($streamingResult['observed_before_exit'], 'Delegated stdout must be observable before the child exits.');
     assertTrue($streamingResult['status'] === 37, 'Delegation must preserve exact child status 37.');
     assertTrue($streamingResult['stdout'] === "delegated-stdout-before-exit\n", 'Delegated stdout must remain on stdout only.');
