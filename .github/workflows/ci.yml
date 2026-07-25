@@ -44,8 +44,14 @@ jobs:
         run: |
           php tests/Composer/ComposerPolicyGuardTest.php
           php tests/Composer/ComposerPolicyGuardTest.php --route-audit
+      - name: Verify Composer manifest
+        run: php bin/composer-policy validate --strict --no-interaction
       - name: Install composer dependencies
         run: php bin/composer-policy install -q --no-ansi --no-interaction --no-progress --prefer-dist
+      - name: Check platform requirements
+        run: php tools/composer/composer-2.10.2.phar check-platform-reqs --lock --no-interaction
+      - name: Audit dependencies
+        run: php bin/composer-policy audit --locked --no-interaction
       - name: Verify Laravel boot and SendPortal Core route registration
         run: |
           php artisan about
