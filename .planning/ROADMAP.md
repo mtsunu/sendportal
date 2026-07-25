@@ -20,7 +20,7 @@ Full details archived in `.planning/milestones/v1.0-ROADMAP.md`.
 
 ### 🚧 v1.1 SES Sending Reliability (Phase 4)
 
-- [ ] **Phase 4: Coordinated SES rate limiting + 2 bug fixes** — Pace SES sends to the account's per-second MaxSendRate across all workers and fix the throttle-path misclassification and null-return bugs, via a host-level adapter override.
+- [x] **Phase 4: Coordinated SES rate limiting + 2 bug fixes** — Pace SES sends to the account's per-second MaxSendRate across all workers and fix the throttle-path misclassification and null-return bugs, via a host-level adapter override. (completed 2026-07-25)
 
 ## Phase Details
 
@@ -35,7 +35,7 @@ Full details archived in `.planning/milestones/v1.0-ROADMAP.md`.
   4. Fault injection between the SES call and `markSent()` does not double-send: all waiting happens *before* the SES call and the block is bounded well below the worker timeout (`< 60s`).
   5. No `vendor/` files are changed and no new Composer dependency is added; `MaxSendRate` is sourced live from `getSendQuota()`, cached ~5 min with safe edge-value handling (`-1`/unlimited/`0`/fractional/sandbox `1.0`) and single-flight refresh; the existing `QuotaService` daily pre-check is unchanged.
 **Plans**: 1 plan
-- [ ] 04-01-PLAN.md — Coordinated SES rate limiting + 2 bug fixes: tracer-first ThrottledSesAdapter (host override, Redis DurationLimiter pacing, cached MaxSendRate, throttle-code sub-branch, named exhaustion exception) rebound via AppServiceProvider; full SES-01..05 test suite.
+- [x] 04-01-PLAN.md — Coordinated SES rate limiting + 2 bug fixes: tracer-first ThrottledSesAdapter (host override, Redis DurationLimiter pacing, cached MaxSendRate, throttle-code sub-branch, named exhaustion exception) rebound via AppServiceProvider; full SES-01..05 test suite.
 
 **Build order** (internal to this phase, not separate phases):
 1. Config + quota sourcing — `config/sendportal-throttle.php`, cached `MaxSendRate` read (`md5(region|access-key-id)` key), edge-value guards, single-flight + last-known-good fallback (SES-02).
@@ -49,4 +49,4 @@ Full details archived in `.planning/milestones/v1.0-ROADMAP.md`.
 | 1. Constraint Resolution and Security Control | v1.0 | 12/12 | Complete | 2026-07-24 |
 | 2. Reproducible Dependency Snapshot | v1.0 | 2/2 | Complete | 2026-07-24 |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |
-| 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 0/? | Not started | - |
+| 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete   | 2026-07-25 |

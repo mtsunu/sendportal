@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: SES Sending Reliability
-status: roadmapped
-last_updated: "2026-07-25T12:10:00.000Z"
+status: verifying
+stopped_at: Completed 04-01-PLAN.md — SES-01..05 green vs real Redis; full DB suite + php-cs-fixer are CI-only env gaps
+last_updated: "2026-07-25T13:20:04.593Z"
 last_activity: 2026-07-25
 progress:
   total_phases: 1
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 100
 ---
 
 # Project State
@@ -20,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-25)
 
 **Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.1: campaign delivery via Amazon SES respects the account's per-second sending limit automatically, coordinated across all workers.
-**Current focus:** v1.1 SES Sending Reliability — Phase 4 roadmapped; ready to plan.
+**Current focus:** Phase 04 — coordinated-ses-rate-limiting-2-bug-fixes
 
 ## Current Position
 
-Phase: 4 — Coordinated SES rate limiting + 2 bug fixes (not started)
-Plan: —
-Status: Roadmapped — ready for `/gsd-plan-phase 4`
-Last activity: 2026-07-25 — Milestone v1.1 roadmap created (single phase, 5 requirements mapped)
+Phase: 04 (coordinated-ses-rate-limiting-2-bug-fixes) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-07-25
 
 ## Performance Metrics
 
@@ -62,6 +63,7 @@ Last activity: 2026-07-25 — Milestone v1.1 roadmap created (single phase, 5 re
 | Phase 02 P01 | 3min | 1 tasks | 2 files |
 | Phase 02 P02 | 3min | 2 tasks | 3 files |
 | Phase 03 P01 | 10min | 2 tasks | 1 files |
+| Phase 04 P01 | 17min | 7 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -76,6 +78,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - Phase 1: Resolve Composer constraints and retain a compatible security safeguard; do not bypass platform or advisory checks.
 - Phase 2: Commit and use one reviewed lockfile for ordinary local, CI, and deployment installs.
 - Phase 3: Preserve Laravel 11 and prove the unchanged SendPortal Core host integration on PHP 8.4.
+- [Phase ?]: Phase 4: SES pacing + 2 bug fixes shipped as host-level ThrottledSesAdapter (Redis DurationLimiter, code-gated throttle classifier, named SesSendThrottledException); no vendor edits, no new dependency.
+- [Phase ?]: Phase 4: cross-process SES-01 proof asserts M sends occupy >= ceil(M/R) aligned integer-second windows (pigeonhole, stable) instead of a flaky per-recorded-timestamp <=R count.
 
 ### Pending Todos
 
@@ -97,9 +101,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-25T12:10:00.000Z
-Stopped at: v1.1 roadmap created — Phase 4 defined, 5 requirements mapped (100% coverage)
-Resume file: .planning/ROADMAP.md (Phase 4 details)
+Last session: 2026-07-25T13:20:04.587Z
+Stopped at: Completed 04-01-PLAN.md — SES-01..05 green vs real Redis; full DB suite + php-cs-fixer are CI-only env gaps
+Resume file: None
 
 ## Operator Next Steps
 
