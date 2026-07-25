@@ -3,6 +3,10 @@
   <testsuites>
     <testsuite name="Test Suite">
       <directory>tests</directory>
+      <!-- tests/Composer holds a standalone CLI guard script (ComposerPolicyGuardTest.php),
+           run directly by the "Verify Composer policy routes" CI step, not a PHPUnit TestCase.
+           PHPUnit's *Test.php discovery would otherwise load its top-level $argv dispatch and abort. -->
+      <exclude>tests/Composer</exclude>
     </testsuite>
   </testsuites>
   <php>
