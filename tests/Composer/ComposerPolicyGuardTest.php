@@ -429,7 +429,7 @@ function assertGuardStructure(string $guard): void
 function trackedFiles(string $repositoryRoot): array
 {
     $result = runCommand(['git', 'ls-files', '-z'], getenv(), $repositoryRoot);
-    assertTrue($result['status'] === 0, 'Could not enumerate tracked files for the route audit.');
+    assertTrue($result['status'] === 0, "Could not enumerate tracked files for the route audit (status={$result['status']} stderr={$result['stderr']}).");
 
     return array_values(array_filter(explode("\0", $result['stdout']), static fn (string $path): bool => $path !== ''));
 }
