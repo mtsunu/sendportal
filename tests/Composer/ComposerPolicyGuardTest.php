@@ -192,20 +192,22 @@ function runStreamingHandshake(array $command, array $environment, string $worki
         fclose($pipes[$descriptor]);
     }
 
-    $status = proc_get_status($process);
+    $finalStatus = proc_get_status($process);
 
-    if ($status['running']) {
+    if ($finalStatus['running']) {
         proc_terminate($process);
     }
 
     $exitStatus = proc_close($process);
 
-    // proc_close() returns -1 when proc_get_status() above already reaped the
-    // child's termination status (PHP caches the exit code on the first status
-    // read, so the later waitpid() in proc_close() sees no child). Fall back to
-    // the cached exit code, mirroring runCommand()'s handling. This only diverges
-    // by platform/PHP build: macOS/PHP 8.4 returns the real code from proc_close()
-    // directly, whereas the CI PHP 8.2 container returns -1.
+    // Once proc_get_status() has observed the child stop, PHP (< 8.3) reaps the
+    // termination status and preserves the exit code only on that FIRST post-exit
+    // read; every later proc_get_status()/proc_close() then reports -1. The loop
+    // above already made that first read (into $status, at the iteration that saw
+    // the child exit), so $finalStatus and proc_close() here are the stale later
+    // reads. Fall back to the in-loop $status['exitcode'], exactly as the sibling
+    // runCommand() helper does. macOS/PHP 8.4 returns the real code from
+    // proc_close() directly; the CI PHP 8.2 container returns -1.
     if ($exitStatus < 0 && is_int($status['exitcode']) && $status['exitcode'] >= 0) {
         $exitStatus = $status['exitcode'];
     }
