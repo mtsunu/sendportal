@@ -1,108 +1,26 @@
 # Roadmap: SendPortal PHP 8.4 Compatibility
 
-## Overview
+## Milestones
 
-This milestone establishes a secure PHP 8.4 installation contract for the existing Laravel 11 and SendPortal Core application. It first resolves the PHP and security-policy constraints, then freezes the approved graph in a reviewed lockfile, and finally proves the exact snapshot boots and passes the existing database matrix in CI—without a Laravel major upgrade or new product behavior.
+- ✅ **v1.0 PHP 8.4 Compatibility** — Phases 1-3 (shipped 2026-07-25)
 
 ## Phases
 
-**Phase Numbering:**
+<details>
+<summary>✅ v1.0 PHP 8.4 Compatibility (Phases 1-3) — SHIPPED 2026-07-25</summary>
 
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+- [x] Phase 1: Constraint Resolution and Security Control (12/12 plans) — completed 2026-07-24, verified passed (7/7 truths)
+- [x] Phase 2: Reproducible Dependency Snapshot (2/2 plans) — completed 2026-07-24
+- [x] Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification (1/1 plan) — completed 2026-07-25
 
-Decimal phases appear between their surrounding integers in numeric order.
+Full details archived in `.planning/milestones/v1.0-ROADMAP.md`.
 
-- [x] **Phase 1: Constraint Resolution and Security Control** - Establish an honest PHP 8.2–8.4 Composer contract and a compatible dependency-security safeguard. ✓ Verified passed 2026-07-24 (7/7 truths).
-- [x] **Phase 2: Reproducible Dependency Snapshot** - Freeze the approved PHP 8.4 graph into a reviewed lockfile and make it the standard installation contract. (completed 2026-07-24)
-- [x] **Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification** - Prove the locked application boots and its existing test matrix continues to work under PHP 8.4. (completed 2026-07-25)
-
-## Phase Details
-
-### Phase 1: Constraint Resolution and Security Control
-
-**Goal**: Operators can resolve a secure, accurately declared PHP 8.2–8.4 dependency graph on real PHP 8.4 without bypassing Composer safeguards.
-**Depends on**: Nothing (first phase)
-**Requirements**: COMP-01, COMP-02, COMP-03
-**Success Criteria** (what must be TRUE):
-
-  1. An operator on PHP 8.4 can resolve the application's dependencies through standard Composer commands without platform-emulation or ignore flags.
-  2. The published Composer metadata declares PHP 8.2, 8.3, and 8.4 as the supported runtime contract.
-  3. Dependency resolution no longer fails because of the Roave/Laravel conflict, while Composer platform checks and a dependency-security safeguard remain enabled.
-
-**Plans**: 7/7 plans executed
-
-Plans:
-
-- [x] 01-07-PLAN.md
-
-- [x] 01-05-PLAN.md
-- [x] 01-06-PLAN.md
-
-- [x] 01-04-PLAN.md
-
-- [x] 01-03-PLAN.md
-
-**Wave 1**
-
-- [x] 01-01-PLAN.md — Capture real PHP 8.4 solver evidence and obtain the required security/scope decision.
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 01-02-PLAN.md — Apply the approved minimal Composer policy contract and prove it in an isolated PHP 8.4 install.
-
-### Phase 2: Reproducible Dependency Snapshot
-
-**Goal**: Operators, CI, and deployments install one validated, security-checked dependency graph rather than independently resolving packages.
-**Depends on**: Phase 1
-**Requirements**: DEPS-01, DEPS-02, DEPS-03, DEPS-04
-**Success Criteria** (what must be TRUE):
-
-  1. The repository contains a reviewed `composer.lock` synchronized with `composer.json`, and strict Composer metadata validation succeeds.
-  2. The exact locked graph passes Composer's PHP 8.4 platform-requirement check.
-  3. The exact locked graph passes a non-bypassed dependency security audit or an equivalent configured Composer policy.
-  4. Local, CI, and deployment installation instructions and automation install the committed lockfile instead of freshly resolving dependencies.
-
-**Plans**: 2 plans
-
-Plans:
-
-**Wave 1**
-
-- [x] 02-01-PLAN.md — Tracer: freeze, track, and validate the lockfile end-to-end (regenerate via guard, prove zero drift, consume via install).
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 02-02-PLAN.md — Lockstep advisory refresh (composer.json + guard, v11.55.0 RETAIN) + platform/audit review evidence + install-contract docs.
-
-### Phase 3: PHP 8.4 Runtime, Core Integration, and CI Verification
-
-**Goal**: Operators have ongoing evidence that the locked PHP 8.4 application, including its existing SendPortal Core integration, boots and passes both supported database test paths.
-**Depends on**: Phase 2
-**Requirements**: RUNTIME-01, RUNTIME-02, RUNTIME-03, RUNTIME-04, CI-01, CI-02
-**Success Criteria** (what must be TRUE):
-
-  1. A normal script-enabled install on PHP 8.4 completes Laravel package discovery and the application passes a safe boot check.
-  2. On PHP 8.4, the existing PHPUnit suite passes against both MySQL and PostgreSQL.
-  3. The existing SendPortal Core provider and route-registration integration boot on PHP 8.4 without a product-behavior change.
-  4. CI retains PHP 8.2 and 8.3 coverage and adds a PHP 8.4 job that uses the committed lockfile.
-  5. The PHP 8.4 CI path fails if Composer metadata, platform requirements, dependency auditing, Laravel/Core boot, or either database-engine PHPUnit run fails.
-
-**Plans**: 1 plan
-
-Plans:
-
-**Wave 1**
-
-- [x] 03-01-PLAN.md — Add PHP 8.4 CI matrix job with script-enabled install, Laravel boot + SendPortal Core route-registration proof, and full Composer metadata/platform/audit gating (RUNTIME-01..04, CI-01, CI-02).
+</details>
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Constraint Resolution and Security Control | 7/7 | Complete | 2026-07-24 |
-| 2. Reproducible Dependency Snapshot | 2/2 | Complete   | 2026-07-24 |
-| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 1/1 | Complete    | 2026-07-25 |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Constraint Resolution and Security Control | v1.0 | 12/12 | Complete | 2026-07-24 |
+| 2. Reproducible Dependency Snapshot | v1.0 | 2/2 | Complete | 2026-07-24 |
+| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |

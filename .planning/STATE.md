@@ -2,35 +2,33 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: milestone_complete
-stopped_at: Milestone complete (Phase 3 was final phase)
-last_updated: 2026-07-25T07:50:46.757Z
+status: Awaiting next milestone
+stopped_at: "Phase 3 executed; live :8.4 CI fully green (all gates + MySQL & Postgres PHPUnit suites)"
+last_updated: "2026-07-25T07:59:07.943Z"
 last_activity: 2026-07-25
+last_activity_desc: Milestone v1.0 completed and archived
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 15
   completed_plans: 15
-  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-22)
+See: .planning/PROJECT.md (updated 2026-07-25)
 
 **Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements.
-**Current focus:** Milestone complete
+**Current focus:** Planning next milestone (v2 candidates: HARD-01/02/03 — upgrade-evidence summary, Core smoke test, quality/coverage repair)
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-25
-
-Phase 01 Progress: [██████████] 100% (complete, verified)
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-25 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -115,3 +113,7 @@ None yet.
 Last session: 2026-07-25T07:45:00.000Z
 Stopped at: Phase 3 executed; live :8.4 CI fully green (all gates + MySQL & Postgres PHPUnit suites)
 Resume file: .planning/phases/03-php-8-4-runtime-core-integration-and-ci-verification/03-01-SUMMARY.md (see "Live-CI Reconciliation")
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
