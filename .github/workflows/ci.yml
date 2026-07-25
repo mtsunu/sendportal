@@ -7,7 +7,8 @@ jobs:
       matrix:
         container: [
           "kirschbaumdevelopment/laravel-test-runner:8.2",
-          "kirschbaumdevelopment/laravel-test-runner:8.3"
+          "kirschbaumdevelopment/laravel-test-runner:8.3",
+          "kirschbaumdevelopment/laravel-test-runner:8.4"
         ]
 
     container:
@@ -44,7 +45,11 @@ jobs:
           php tests/Composer/ComposerPolicyGuardTest.php
           php tests/Composer/ComposerPolicyGuardTest.php --route-audit
       - name: Install composer dependencies
-        run: php bin/composer-policy install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+        run: php bin/composer-policy install -q --no-ansi --no-interaction --no-progress --prefer-dist
+      - name: Verify Laravel boot and SendPortal Core route registration
+        run: |
+          php artisan about
+          php artisan route:list --no-ansi | grep -q sendportal.dashboard
       - name: Run Testsuite against MySQL
         run: vendor/bin/phpunit
         env:
