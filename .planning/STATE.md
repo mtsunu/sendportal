@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: SES Sending Reliability
-status: planning
-last_updated: "2026-07-25T11:56:03.198Z"
+status: roadmapped
+last_updated: "2026-07-25T12:10:00.000Z"
 last_activity: 2026-07-25
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,15 +19,15 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-07-25)
 
-**Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements.
-**Current focus:** Planning next milestone (v2 candidates: HARD-01/02/03 — upgrade-evidence summary, Core smoke test, quality/coverage repair)
+**Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.1: campaign delivery via Amazon SES respects the account's per-second sending limit automatically, coordinated across all workers.
+**Current focus:** v1.1 SES Sending Reliability — Phase 4 roadmapped; ready to plan.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 4 — Coordinated SES rate limiting + 2 bug fixes (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-25 — Milestone v1.1 started
+Status: Roadmapped — ready for `/gsd-plan-phase 4`
+Last activity: 2026-07-25 — Milestone v1.1 roadmap created (single phase, 5 requirements mapped)
 
 ## Performance Metrics
 
@@ -69,26 +69,13 @@ Last activity: 2026-07-25 — Milestone v1.1 started
 
 Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecting current work:
 
+- v1.1 Phase 4: Deliver SES pacing + throttle-bug fixes as a host-level override (`ThrottledSesAdapter` rebound via `MailAdapterFactory::$adapterMap` in `AppServiceProvider::boot()`); never edit `vendor/mettle/sendportal-core`.
+- v1.1 Phase 4: Use Laravel's bundled `Redis::throttle()` `DurationLimiter` over the shared `default` connection as the cross-process pacing primitive — zero new Composer dependency.
+- v1.1 Phase 4: Governing invariant — do ALL waiting BEFORE the SES call, never between `send()` and `markSent()`; bounded block `max_block_seconds=15 << timeout 60 < retry_after 90` to prevent double-send.
+- v1.1 Phase 4: `Throttling` covers both rate-exceeded (retry) and daily-quota-exceeded (fail fast); gate on the AWS error code then sub-branch on message. Horizon `tries=3` is the single retry owner.
 - Phase 1: Resolve Composer constraints and retain a compatible security safeguard; do not bypass platform or advisory checks.
 - Phase 2: Commit and use one reviewed lockfile for ordinary local, CI, and deployment installs.
 - Phase 3: Preserve Laravel 11 and prove the unchanged SendPortal Core host integration on PHP 8.4.
-- [Phase ?]: Used Herd Composer 2.10.2 under real PHP 8.4.23 for clean-environment solver evidence.
-- [Phase ?]: The temporary native policy blocks advisories and limits ignore-id to the three owner-approved D-02 IDs; no development Laravel branch was accepted.
-- [Phase ?]: Declared PHP ^8.2 and retained Laravel ^11.0 with SendPortal Core ^3.0 after the real PHP 8.4 proof.
-- [Phase ?]: Replaced Roave with Composer native blocking/audit policy and exactly three owner-approved, time-bounded advisory IDs.
-- [Phase ?]: Set Composer policy.ignore-unreachable to false and proved update/install fail closed for an unreachable temporary policy source.
-- [Phase ?]: Require Composer >=2.10.0 plus a successful native policy capability probe through PHP_BINARY before dependency resolution.
-- [Phase ?]: Route every supported CI and documented operator Composer mutation command through bin/composer-policy.
-- [Phase ?]: Allow only canonical validate, audit, install, and update commands through the isolated Composer policy guard.
-- [Phase ?]: Replace caller COMPOSER_HOME with a private mode-0700 home and preserve credentials only through COMPOSER_AUTH.
-- [Phase ?]: Use bounded concurrent capture only for preflight probes and direct matching descriptors for delegated Composer I/O.
-- [Phase ?]: Fail closed per supported route segment when bounded workflow, shell, or PHP parsing cannot classify Composer-bearing execution text.
-- [Phase ?]: Decide PHP program-bearing status solely from one token_get_all()-based command-shaped helper; no raw whole-source Composer regex and no production-route allowlist in tracked-PHP finalization.
-- [Phase ?]: Phase 2 Plan 1: froze Phase-1 graph via guarded update --lock (freeze-only) after full update drifted aws/aws-sdk-php; committed tracked composer.lock, zero drift, content-hash 41abd56c5581800607cc9d3c28862a76.
-- [Phase ?]: Used guarded update --lock (freeze-only) not update --prefer-dist to refresh the lock; full update drifts aws/aws-sdk-php (Wave 1 finding).
-- [Phase ?]: RETAIN branch: kept all three PKSA advisory IDs re-justified against locked laravel/framework v11.55.0 with forward expiry; guard rationale in lockstep.
-- [Phase ?]: check-platform-reqs invoked directly against tools/composer/composer-2.10.2.phar (outside bin/composer-policy canonical set) to avoid version drift from the CI container's unpinned system Composer
-- [Phase ?]: Boot and SendPortal Core route-registration proof combined into one CI step (php artisan about + route:list grep), no .env/APP_KEY provisioning needed
 
 ### Pending Todos
 
@@ -96,23 +83,24 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 1: Exact final package versions and solver evidence require a networked PHP 8.4 resolution.
-- Phase 3: RESOLVED — live `:8.4` CI verified the real container/Composer/extension/DB baseline: all gate steps (composer policy, manifest, install, platform-reqs, audit, boot + Core-route) pass on PHP 8.4.
-- Phase 3: Committed Phase-2 lock is PHP 8.4-only (Symfony 8.1 components require `php >=8.4.1`); `:8.2`/`:8.3` install fails against it. Matrix scoped to `:8.4` per owner decision; `require.php` left `^8.2` (permissive floor) to keep the guard manifest policy and `composer.lock` byte-unchanged.
+- v1.1 Phase 4: Fixed-window edge burst — `DurationLimiter` may permit ~2N across a sub-second boundary. Ship the simple limiter; token-bucket escalation (SES-06) is deferred unless SES throttling is observed in production.
+- v1.1 Phase 4: App-level idempotency beyond `sent_at` (SES-07) is an open design call — the block-before-send invariant + 15s bound is the minimum mitigation; decide during Phase 4 planning.
 
 ## Deferred Items
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | Framework lifecycle | Laravel major-version/security modernization | Separate milestone | 2026-07-22 |
-| Quality hardening | Static analysis and coverage-configuration repair | v2 | 2026-07-22 |
+| Quality hardening | Static analysis and coverage-configuration repair (HARD-03) | v2 | 2026-07-22 |
+| SES reliability | Custom Redis-Lua token-bucket limiter (SES-06) | Future — only if fixed-window trips SES | 2026-07-25 |
+| SES reliability | App-level idempotency marker beyond `sent_at` (SES-07) | Future — unless SES-05 fault-injection proves the bounded block insufficient | 2026-07-25 |
 
 ## Session Continuity
 
-Last session: 2026-07-25T07:45:00.000Z
-Stopped at: Phase 3 executed; live :8.4 CI fully green (all gates + MySQL & Postgres PHPUnit suites)
-Resume file: .planning/phases/03-php-8-4-runtime-core-integration-and-ci-verification/03-01-SUMMARY.md (see "Live-CI Reconciliation")
+Last session: 2026-07-25T12:10:00.000Z
+Stopped at: v1.1 roadmap created — Phase 4 defined, 5 requirements mapped (100% coverage)
+Resume file: .planning/ROADMAP.md (Phase 4 details)
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 4 with `/gsd-plan-phase 4`
