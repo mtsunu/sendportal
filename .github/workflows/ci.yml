@@ -55,6 +55,14 @@ jobs:
         run: |
           php artisan about
           php artisan route:list --no-ansi | grep -q sendportal.dashboard
+      - name: Prepare application environment for test suite
+        # SetupTest exercises the setup wizard: Env::check() requires a .env file to
+        # exist and Url::check() requires a non-localhost APP_URL. The DB_* and APP_KEY
+        # test values come from phpunit.xml.dist / the per-suite env: blocks below, which
+        # take precedence over these .env values.
+        run: |
+          cp .env.example .env
+          sed -i 's#^APP_URL=.*#APP_URL=http://localhost:8000#' .env
       - name: Run Testsuite against MySQL
         run: vendor/bin/phpunit
         env:
