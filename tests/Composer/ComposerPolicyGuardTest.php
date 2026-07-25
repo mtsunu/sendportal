@@ -200,6 +200,16 @@ function runStreamingHandshake(array $command, array $environment, string $worki
 
     $exitStatus = proc_close($process);
 
+    // proc_close() returns -1 when proc_get_status() above already reaped the
+    // child's termination status (PHP caches the exit code on the first status
+    // read, so the later waitpid() in proc_close() sees no child). Fall back to
+    // the cached exit code, mirroring runCommand()'s handling. This only diverges
+    // by platform/PHP build: macOS/PHP 8.4 returns the real code from proc_close()
+    // directly, whereas the CI PHP 8.2 container returns -1.
+    if ($exitStatus < 0 && is_int($status['exitcode']) && $status['exitcode'] >= 0) {
+        $exitStatus = $status['exitcode'];
+    }
+
     return [
         'status' => $exitStatus,
         'stdout' => $stdout,
