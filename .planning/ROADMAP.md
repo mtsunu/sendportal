@@ -88,7 +88,13 @@ Plans:
   4. CI retains PHP 8.2 and 8.3 coverage and adds a PHP 8.4 job that uses the committed lockfile.
   5. The PHP 8.4 CI path fails if Composer metadata, platform requirements, dependency auditing, Laravel/Core boot, or either database-engine PHPUnit run fails.
 
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Add PHP 8.4 CI matrix job with script-enabled install, Laravel boot + SendPortal Core route-registration proof, and full Composer metadata/platform/audit gating (RUNTIME-01..04, CI-01, CI-02).
 
 ## Progress
 
@@ -99,4 +105,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Constraint Resolution and Security Control | 7/7 | Complete | 2026-07-24 |
 | 2. Reproducible Dependency Snapshot | 2/2 | Complete   | 2026-07-24 |
-| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/TBD | Not started | - |
+| 3. PHP 8.4 Runtime, Core Integration, and CI Verification | 0/1 | Not started | - |
