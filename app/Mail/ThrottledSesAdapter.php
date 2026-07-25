@@ -7,6 +7,7 @@ namespace App\Mail;
 use Aws\Ses\SesClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Sendportal\Base\Adapters\SesMailAdapter;
 use Sendportal\Base\Services\Messages\MessageTrackingOptions;
@@ -22,6 +23,12 @@ use Sendportal\Base\Services\Messages\MessageTrackingOptions;
  */
 final class ThrottledSesAdapter extends SesMailAdapter
 {
+    /**
+     * Sentinel returned by resolveSendRate() when the account has no per-second
+     * cap (SES MaxSendRate = -1). send() bypasses the limiter entirely in this case.
+     */
+    public const RATE_UNLIMITED = -1;
+
     /**
      * Inject a pre-built (mocked) SES client. The factory instantiates adapters
      * with `new` (no container DI), so this is the seam tests use.
@@ -41,21 +48,58 @@ final class ThrottledSesAdapter extends SesMailAdapter
         $payload = $this->buildPayload($fromEmail, $fromName, $toEmail, $subject, $content);
         $rate = $this->resolveSendRate();
 
+        if ($rate === self::RATE_UNLIMITED) {
+            return $this->resolveMessageId($this->resolveClient()->sendEmail($payload));
+        }
+
         return $this->paceAndSend($rate, $payload);
     }
 
     /**
-     * Resolve the per-second send rate from the (cached) account MaxSendRate.
+     * Resolve the per-second send rate from the account MaxSendRate.
+     *
+     * Cached for rate_cache_ttl; the refresh is single-flight (Cache::lock) with a
+     * sibling last-known-good key, so a held lock returns the stale value instead of
+     * issuing a second GetSendQuota (stampede protection across ~20 workers).
+     *
+     * Returns self::RATE_UNLIMITED when the account is uncapped.
      */
     public function resolveSendRate(): int
     {
+        $cacheKey = 'sp:ses:maxrate:' . $this->throttleKeyHash();
         $ttl = (int) config('sendportal-throttle.rate_cache_ttl', 300);
 
-        return (int) Cache::remember(
-            'sp:ses:maxrate:' . $this->throttleKeyHash(),
-            $ttl,
-            fn (): int => $this->normalizeRate($this->readMaxSendRate())
-        );
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return (int) $cached;
+        }
+
+        $lock = Cache::lock($cacheKey . ':lock', 10);
+
+        if (! $lock->get()) {
+            // A concurrent worker is refreshing: prefer last-known-good over a
+            // second GetSendQuota call.
+            $last = Cache::get($cacheKey . ':last');
+
+            return $last !== null ? (int) $last : $this->normalizeRate(null);
+        }
+
+        try {
+            // Double-check under the lock in case a peer just populated it.
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return (int) $cached;
+            }
+
+            $rate = $this->normalizeRate($this->readMaxSendRate());
+
+            Cache::put($cacheKey, $rate, $ttl);
+            Cache::forever($cacheKey . ':last', $rate);
+
+            return $rate;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -101,10 +145,43 @@ final class ThrottledSesAdapter extends SesMailAdapter
 
     /**
      * Normalize a raw MaxSendRate to a usable integer per-second rate.
+     *
+     * -1 (uncapped) -> self::RATE_UNLIMITED; 0 or missing -> conservative default
+     * (one info log); fractional -> floored, >= 1; sandbox 1.0 -> 1.
      */
     protected function normalizeRate(mixed $raw): int
     {
-        return max(1, (int) floor((float) $raw));
+        if ($raw === null || $raw === '') {
+            return $this->fallbackRate();
+        }
+
+        $value = (float) $raw;
+
+        if ($value < 0) {
+            return self::RATE_UNLIMITED;
+        }
+
+        if ($value < 1) {
+            return $this->fallbackRate();
+        }
+
+        return (int) floor($value);
+    }
+
+    /**
+     * The conservative fallback rate used when MaxSendRate is 0 or missing.
+     * Emits a single info log line (LOCKED scope: at most one info log line).
+     */
+    protected function fallbackRate(): int
+    {
+        $default = max(1, (int) config('sendportal-throttle.default_rate', 1));
+
+        Log::info('SES MaxSendRate unavailable; using conservative default send rate.', [
+            'key' => $this->throttleKeyHash(),
+            'default_rate' => $default,
+        ]);
+
+        return $default;
     }
 
     /**
