@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Phase 3 executed; live :8.4 CI gates green; PHPUnit env-provisioning deferred
-last_updated: "2026-07-25T07:15:00.000Z"
+stopped_at: Phase 3 executed; live :8.4 CI fully green (all gates + MySQL & Postgres PHPUnit)
+last_updated: "2026-07-25T07:45:00.000Z"
 last_activity: 2026-07-25
 progress:
   total_phases: 3
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-22)
 
 Phase: 03 (php-8-4-runtime-core-integration-and-ci-verification) — EXECUTED, live-CI reconciled
 Plan: 1 of 1
-Status: Core PHP 8.4 gates GREEN in live CI (:8.4). Matrix scoped to :8.4 (owner decision; committed lock is 8.4-only). PHPUnit test-env provisioning (.env + non-localhost APP_URL for SetupTest) deferred as follow-up.
+Status: Live :8.4 CI FULLY GREEN — all six gate steps + MySQL and Postgres PHPUnit suites (OK, 38 tests each). Matrix scoped to :8.4 (owner decision; committed lock is 8.4-only). Run 30149730614.
 Last activity: 2026-07-25
 
 Phase 01 Progress: [██████████] 100% (complete, verified)
@@ -108,10 +108,9 @@ None yet.
 |----------|------|--------|-------------|
 | Framework lifecycle | Laravel major-version/security modernization | Separate milestone | 2026-07-22 |
 | Quality hardening | Static analysis and coverage-configuration repair | v2 | 2026-07-22 |
-| CI test-env | PHPUnit `SetupTest` needs CI-provisioned `.env` + non-localhost `APP_URL` (Env/Url step checks). Fix: `cp .env.example .env` before the suite + set `APP_URL` (e.g. via `phpunit.xml.dist`). Not a PHP 8.4 defect; verify via CI (local `.env` writes blocked). | Owner-approved follow-up | 2026-07-25 |
 
 ## Session Continuity
 
-Last session: 2026-07-25T07:15:00.000Z
-Stopped at: Phase 3 executed; live :8.4 CI gates green; PHPUnit env-provisioning deferred
+Last session: 2026-07-25T07:45:00.000Z
+Stopped at: Phase 3 executed; live :8.4 CI fully green (all gates + MySQL & Postgres PHPUnit suites)
 Resume file: .planning/phases/03-php-8-4-runtime-core-integration-and-ci-verification/03-01-SUMMARY.md (see "Live-CI Reconciliation")

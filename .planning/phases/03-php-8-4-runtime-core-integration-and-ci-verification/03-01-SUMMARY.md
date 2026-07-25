@@ -213,20 +213,30 @@ Owner-approved decision — the committed lock is 8.4-only and the milestone tar
 This deviates from the plan `must_haves.truths` that referenced retaining `:8.2`/`:8.3`
 (RUNTIME-02/03 MySQL/Postgres coverage now runs under `:8.4`).
 
-**Outstanding (deferred, owner-approved) — PHPUnit test-environment provisioning:**
-The `Run Testsuite against MySQL`/`Postgres` steps run but one pre-existing setup-wizard test,
-`Tests\Feature\Setup\SetupTest::the_setup_command_should_stop_on_the_admin_step_if_there_are_not_users`,
-fails in CI because it needs a provisioned `.env` file (`Env::check()` = `file_exists('.env')`)
-and a non-localhost `APP_URL` (`Url::check()` rejects `http://localhost`, which `.env.example`
-sets). This is CI test-environment provisioning, **not** a PHP 8.4 defect — the app itself boots
-and runs on 8.4 (proven by the green gate steps). Fix (deferred): add `cp .env.example .env`
-before the test suite and set a non-localhost `APP_URL` (e.g. via `phpunit.xml.dist`). Local
-verification of that fix is blocked in this environment (`.env` writes denied), so it should be
-verified via CI.
+**PHPUnit suite — resolved to fully green (run `30149730614`, conclusion `success`):**
+Getting both database suites green required three further fixes, all pre-existing and unrelated
+to PHP 8.4:
+- `5e58a35` — excluded `tests/Composer` (the CLI guard script) from PHPUnit discovery (was a hard exit-255 fatal).
+- `17341a3` — provisioned `.env` in CI (`cp .env.example .env` + non-localhost `APP_URL`) so the
+  setup-wizard test's `Env::check()`/`Url::check()` pass.
+- `50b3908` — corrected a stale, self-contradictory upstream assertion in
+  `SetupTest::the_setup_command_should_stop_on_the_admin_step_if_there_are_not_users`
+  (`assertEquals(5, $step['completed'])` → `assertFalse($step['completed'])`; the `completed`
+  field is a boolean and the "no users" premise means the Admin step is incomplete).
+- `841c201` — set `DB_PORT` per suite (3306 MySQL, 5432 Postgres); the provisioned `.env` set
+  `DB_PORT=3306` which the Postgres suite had inherited (connection refused on 3306).
+
+**Final live `:8.4` result — ENTIRE job green:** all six Phase-3 gate steps plus
+`Run Testsuite against MySQL` → `OK (38 tests, 89 assertions)` and
+`Run Testsuite against Postgres` → `OK (38 tests, 89 assertions)`.
+Run: https://github.com/mtsunu/sendportal/actions/runs/30149730614
+
+`composer.json`, `composer.lock`, `bin/composer-policy`, and
+`tools/composer/ComposerPolicyCommandContract.php` remain byte-unchanged vs pre-Phase-3.
 
 ---
 *Phase: 03-php-8-4-runtime-core-integration-and-ci-verification*
-*Completed: 2026-07-25 (core 8.4 gates proven green in live CI; PHPUnit env-provisioning deferred)*
+*Completed: 2026-07-25 — live `:8.4` CI fully green (all gates + MySQL & Postgres PHPUnit suites)*
 
 ## Self-Check: PASSED
 
