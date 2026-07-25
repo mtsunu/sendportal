@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-07-25T02:55:40.311Z"
+stopped_at: Phase 3 executed; live :8.4 CI gates green; PHPUnit env-provisioning deferred
+last_updated: "2026-07-25T07:15:00.000Z"
 last_activity: 2026-07-25
 progress:
   total_phases: 3
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-07-22)
 
 ## Current Position
 
-Phase: 03 (php-8-4-runtime-core-integration-and-ci-verification) — EXECUTING
+Phase: 03 (php-8-4-runtime-core-integration-and-ci-verification) — EXECUTED, live-CI reconciled
 Plan: 1 of 1
-Status: Phase complete — ready for verification
+Status: Core PHP 8.4 gates GREEN in live CI (:8.4). Matrix scoped to :8.4 (owner decision; committed lock is 8.4-only). PHPUnit test-env provisioning (.env + non-localhost APP_URL for SetupTest) deferred as follow-up.
 Last activity: 2026-07-25
 
 Phase 01 Progress: [██████████] 100% (complete, verified)
@@ -99,7 +99,8 @@ None yet.
 ### Blockers/Concerns
 
 - Phase 1: Exact final package versions and solver evidence require a networked PHP 8.4 resolution.
-- Phase 3: Verify the final PHP 8.4 CI image, Composer version, extensions, and both database drivers against the locked graph.
+- Phase 3: RESOLVED — live `:8.4` CI verified the real container/Composer/extension/DB baseline: all gate steps (composer policy, manifest, install, platform-reqs, audit, boot + Core-route) pass on PHP 8.4.
+- Phase 3: Committed Phase-2 lock is PHP 8.4-only (Symfony 8.1 components require `php >=8.4.1`); `:8.2`/`:8.3` install fails against it. Matrix scoped to `:8.4` per owner decision; `require.php` left `^8.2` (permissive floor) to keep the guard manifest policy and `composer.lock` byte-unchanged.
 
 ## Deferred Items
 
@@ -107,9 +108,10 @@ None yet.
 |----------|------|--------|-------------|
 | Framework lifecycle | Laravel major-version/security modernization | Separate milestone | 2026-07-22 |
 | Quality hardening | Static analysis and coverage-configuration repair | v2 | 2026-07-22 |
+| CI test-env | PHPUnit `SetupTest` needs CI-provisioned `.env` + non-localhost `APP_URL` (Env/Url step checks). Fix: `cp .env.example .env` before the suite + set `APP_URL` (e.g. via `phpunit.xml.dist`). Not a PHP 8.4 defect; verify via CI (local `.env` writes blocked). | Owner-approved follow-up | 2026-07-25 |
 
 ## Session Continuity
 
-Last session: 2026-07-25T02:55:40.305Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: None
+Last session: 2026-07-25T07:15:00.000Z
+Stopped at: Phase 3 executed; live :8.4 CI gates green; PHPUnit env-provisioning deferred
+Resume file: .planning/phases/03-php-8-4-runtime-core-integration-and-ci-verification/03-01-SUMMARY.md (see "Live-CI Reconciliation")

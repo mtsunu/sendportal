@@ -180,9 +180,53 @@ None - no external service configuration required. The workflow change takes eff
 - All requirements for this plan (RUNTIME-01..04, CI-01, CI-02) are locally proven; final closure is gated on observing the live `:8.4` GitHub Actions run go green (see Outstanding Real-CI Proof above).
 - No blockers for closing out Phase 3 beyond that live-CI observation, which is outside this executor's ability to trigger without a push.
 
+## Live-CI Reconciliation (post-execution, 2026-07-25)
+
+The outstanding "real-CI proof" above was resolved by enabling GitHub Actions on the
+fork (`mtsunu/sendportal`, a fork of `mettle/sendportal` — Actions were disabled by
+default and required a one-time manual enable in the Actions tab) and pushing. The
+first live runs exposed several **pre-existing** defects that had never surfaced because
+the fork's CI had never executed. All were fixed; `composer.json`, `composer.lock`,
+`bin/composer-policy`, and `tools/composer/ComposerPolicyCommandContract.php` remain
+**byte-unchanged vs pre-Phase-3** (governance/lock intact).
+
+**Fix chain (all pushed to `master`):**
+
+| Commit | Issue | Class |
+|--------|-------|-------|
+| `a878fb7` | Guard route-audit self-test pinned inventory `=== 6`; Phase-3's two new guarded CI commands (`validate`, `audit`) raised it to 8 | **Phase-3 regression** — the plan's `<verify>` ran the six commands but never ran the guard self-test suite that CI runs |
+| `5022faf`, `b92b51a` | `ComposerPolicyGuardTest.php` `runStreamingHandshake()` read the delegated child's exit code from `proc_close()`, which returns -1 in PHP 8.2 after `proc_get_status()` reaped it; fixed to use the in-loop status like `runCommand()` | pre-existing (macOS/PHP 8.4 only) |
+| `c1add6e` | `unreadable distribution` scenario `chmod(0000)` can't fail-close under root (CI containers run as root); skip under `posix_geteuid()===0` | pre-existing (root-in-container) |
+| `8ecb4f1` | `git ls-files`/fixture `git init` failed with "dubious ownership" (workspace uid ≠ root process); added `git config --global --add safe.directory '*'` to the guard step | pre-existing (git ≥2.35.2 in container) |
+| `8b9d01f` | Committed Phase-2 lock resolves Symfony 8.1 components requiring `php >=8.4.1`, so `composer install` against the lock only succeeds on 8.4; `:8.2`/`:8.3` install failed | **Phase-2 lockfile reality** — resolved to scope the CI matrix to `:8.4` (the milestone's stated target) rather than re-resolve the governed lock; `require.php` left `^8.2` so the guard manifest policy and lock stay byte-unchanged |
+| `5e58a35` | PHPUnit globbed `tests/` and tried to load the CLI guard script as a TestCase → exit 255; excluded `tests/Composer` from PHPUnit discovery | pre-existing (guard script added in Phase 1) |
+
+**Final live `:8.4` result — all Phase-3 gate steps GREEN:**
+`Verify Composer policy routes` ✅ · `Verify Composer manifest` ✅ · `Install composer dependencies` ✅ · `Check platform requirements` ✅ · `Audit dependencies` ✅ · `Verify Laravel boot and SendPortal Core route registration` ✅
+
+This proves the milestone's core value on real PHP 8.4: the locked application installs
+(script-enabled, package discovery runs), boots (`artisan about`), and registers
+SendPortal Core routes (`sendportal.dashboard`) inside the real container.
+
+**Scope change vs original plan:** the CI matrix is now `:8.4` only (was `:8.2`/`:8.3`/`:8.4`).
+Owner-approved decision — the committed lock is 8.4-only and the milestone target is PHP 8.4.
+This deviates from the plan `must_haves.truths` that referenced retaining `:8.2`/`:8.3`
+(RUNTIME-02/03 MySQL/Postgres coverage now runs under `:8.4`).
+
+**Outstanding (deferred, owner-approved) — PHPUnit test-environment provisioning:**
+The `Run Testsuite against MySQL`/`Postgres` steps run but one pre-existing setup-wizard test,
+`Tests\Feature\Setup\SetupTest::the_setup_command_should_stop_on_the_admin_step_if_there_are_not_users`,
+fails in CI because it needs a provisioned `.env` file (`Env::check()` = `file_exists('.env')`)
+and a non-localhost `APP_URL` (`Url::check()` rejects `http://localhost`, which `.env.example`
+sets). This is CI test-environment provisioning, **not** a PHP 8.4 defect — the app itself boots
+and runs on 8.4 (proven by the green gate steps). Fix (deferred): add `cp .env.example .env`
+before the test suite and set a non-localhost `APP_URL` (e.g. via `phpunit.xml.dist`). Local
+verification of that fix is blocked in this environment (`.env` writes denied), so it should be
+verified via CI.
+
 ---
 *Phase: 03-php-8-4-runtime-core-integration-and-ci-verification*
-*Completed: 2026-07-25*
+*Completed: 2026-07-25 (core 8.4 gates proven green in live CI; PHPUnit env-provisioning deferred)*
 
 ## Self-Check: PASSED
 
