@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mail;
 
+use Aws\Ses\Exception\SesException;
 use Aws\Ses\SesClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -28,6 +29,15 @@ final class ThrottledSesAdapter extends SesMailAdapter
      * cap (SES MaxSendRate = -1). send() bypasses the limiter entirely in this case.
      */
     public const RATE_UNLIMITED = -1;
+
+    /** A Throttling error caused by exceeding the per-second rate — retry it. */
+    public const CLASSIFY_RATE = 'rate_retryable';
+
+    /** A Throttling error caused by the daily quota — fail fast, do not retry. */
+    public const CLASSIFY_DAILY_QUOTA = 'daily_quota_failfast';
+
+    /** Any non-Throttling SesException — propagate unchanged. */
+    public const CLASSIFY_PROPAGATE = 'propagate';
 
     /**
      * Inject a pre-built (mocked) SES client. The factory instantiates adapters
@@ -133,6 +143,30 @@ final class ThrottledSesAdapter extends SesMailAdapter
                     );
                 }
             );
+    }
+
+    /**
+     * Classify a SesException (SES-03, BUG 1 fix).
+     *
+     * Detection is CODE-gated first: any non-'Throttling' error propagates
+     * unchanged. AWS returns the SAME 'Throttling' code for both "Maximum sending
+     * rate exceeded." (retryable) and "Daily message quota exceeded." (fail fast),
+     * so the Throttling case is sub-branched on getAwsErrorMessage() — the clean AWS
+     * text — NOT the verbose getMessage() wrapper the vendor trait matched on.
+     */
+    public function classifyThrottleException(SesException $e): string
+    {
+        if ($e->getAwsErrorCode() !== 'Throttling') {
+            return self::CLASSIFY_PROPAGATE;
+        }
+
+        $message = strtolower((string) $e->getAwsErrorMessage());
+
+        if (str_contains($message, 'daily message quota exceeded')) {
+            return self::CLASSIFY_DAILY_QUOTA;
+        }
+
+        return self::CLASSIFY_RATE;
     }
 
     /**
