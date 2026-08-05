@@ -32,7 +32,7 @@ Full details archived in `.planning/milestones/v1.1-ROADMAP.md`.
 
 **Milestone Goal:** Operators can save a sender identity (label + From Name + From Email) once and reuse it via a dropdown when creating a campaign, instead of retyping it every time.
 
-- [ ] **Phase 5: Sender Identity Management** - Operators can create, list, edit, and delete workspace-scoped saved sender identities
+- [ ] **Phase 5: Sender Identity Management** - Operators can create, list, edit, and delete workspace-scoped saved sender identities (2 plans)
 - [ ] **Phase 6: Campaign Form Sender Selection** - Users can pick a saved sender from a dropdown on the campaign form, delivered with zero `vendor/` edits
 - [ ] **Phase 7: Sender Auto-Capture & Data Integrity** - New senders are captured automatically (deduplicated) from campaign creation, and historical campaigns are immune to later sender edits/deletes
 
@@ -48,7 +48,10 @@ Full details archived in `.planning/milestones/v1.1-ROADMAP.md`.
   3. User can edit an existing sender's label, From Name, and From Email, and the change is reflected in the Senders list.
   4. User can delete a saved sender.
   5. Invalid sender input (missing label/From Name, malformed From Email) is rejected with validation errors, and a user cannot view, edit, or delete another workspace's senders.
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 05-01-PLAN.md — Establish the workspace-scoped sender create/list tracer slice
+- [ ] 05-02-PLAN.md — Complete sender edit/delete, validation, and isolation coverage
 **UI hint**: yes
 
 ### Phase 6: Campaign Form Sender Selection
