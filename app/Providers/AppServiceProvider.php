@@ -57,7 +57,8 @@ class AppServiceProvider extends ServiceProvider
 
         Sendportal::setSidebarHtmlContentResolver(
             static function () {
-                return view('layouts.sidebar.manageUsersMenuItem')->render();
+                return view('layouts.sidebar.manageUsersMenuItem')->render()
+                    . view('layouts.sidebar.sendersMenuItem')->render();
             }
         );
 

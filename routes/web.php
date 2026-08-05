@@ -83,6 +83,21 @@ Route::namespace('Workspaces')->middleware(
         'verified',
         RequireWorkspace::class,
     ]
+)->name('senders.')->prefix('senders')->group(
+    static function (Router $sendersRouter) {
+        $sendersRouter->get('/', 'SendersController@index')->name('index');
+        $sendersRouter->get('/create', 'SendersController@create')->name('create');
+        $sendersRouter->post('/', 'SendersController@store')->name('store');
+    }
+);
+
+// Workspace Management.
+Route::namespace('Workspaces')->middleware(
+    [
+        'auth',
+        'verified',
+        RequireWorkspace::class,
+    ]
 )->group(
     static function (Router $workspaceRouter) {
         $workspaceRouter->resource('workspaces', 'WorkspacesController')->except(

@@ -23,6 +23,7 @@ use Sendportal\Base\Models\BaseModel;
  * @property User $owner
  * @property EloquentCollection $users
  * @property EloquentCollection $invitations
+ * @property EloquentCollection $senders
  *
  * @method static WorkspaceFactory factory
  */
@@ -100,6 +101,14 @@ class Workspace extends BaseModel
     public function invitations(): HasMany
     {
         return $this->hasMany(Invitation::class);
+    }
+
+    /**
+     * Get all of the sender identities in the workspace.
+     */
+    public function senders(): HasMany
+    {
+        return $this->hasMany(Sender::class);
     }
 
     /**
