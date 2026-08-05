@@ -36,6 +36,7 @@
                                 <th>{{ __('Label') }}</th>
                                 <th>{{ __('From Name') }}</th>
                                 <th>{{ __('From Email') }}</th>
+                                <th>{{ __('Actions') }}</th>
                             </tr>
                             </thead>
                             <tbody>
@@ -44,6 +45,14 @@
                                     <td>{{ $sender->label }}</td>
                                     <td>{{ $sender->from_name }}</td>
                                     <td>{{ $sender->from_email }}</td>
+                                    <td class="text-nowrap">
+                                        <a class="btn btn-sm btn-outline-secondary" href="{{ route('senders.edit', $sender) }}">{{ __('Edit Sender') }}</a>
+                                        <form class="d-inline" action="{{ route('senders.destroy', $sender) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this sender? This action cannot be undone.')">
+                                            @csrf
+                                            @method('delete')
+                                            <button class="btn btn-sm btn-outline-danger" type="submit">{{ __('Delete Sender') }}</button>
+                                        </form>
+                                    </td>
                                 </tr>
                             @endforeach
                             </tbody>

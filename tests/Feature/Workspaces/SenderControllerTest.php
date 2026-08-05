@@ -298,8 +298,8 @@ class SenderControllerTest extends TestCase
             'senders.store',
             'senders.update',
         ], $routeNames);
-        $this->assertFalse(app('router')->getRoutes()->getByName('campaigns.sender-selection'));
-        $this->assertFalse(app('router')->getRoutes()->getByName('campaigns.sender-auto-capture'));
+        $this->assertNull(app('router')->getRoutes()->getByName('campaigns.sender-selection'));
+        $this->assertNull(app('router')->getRoutes()->getByName('campaigns.sender-auto-capture'));
         $this->assertFalse(class_exists('App\\Services\\Campaigns\\SelectCampaignSender'));
         $this->assertFalse(class_exists('App\\Services\\Campaigns\\AutoCaptureCampaignSender'));
     }

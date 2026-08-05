@@ -1,5 +1,8 @@
 <form action="{{ $action }}" method="post">
     @csrf
+    @if (($method ?? 'post') !== 'post')
+        @method($method)
+    @endif
 
     @if ($errors->any())
         <div class="alert alert-danger" role="alert">
@@ -9,7 +12,7 @@
 
     <div class="form-group">
         <label for="sender-label">{{ __('Label') }}</label>
-        <input id="sender-label" type="text" name="label" value="{{ old('label') }}"
+        <input id="sender-label" type="text" name="label" value="{{ old('label', $sender->label ?? '') }}"
                class="form-control @error('label') is-invalid @enderror" maxlength="255" required>
         <small class="form-text text-muted">{{ __('A recognizable name for this sender.') }}</small>
         @error('label') <div class="invalid-feedback">{{ $message }}</div> @enderror
@@ -17,7 +20,7 @@
 
     <div class="form-group">
         <label for="sender-from-name">{{ __('From Name') }}</label>
-        <input id="sender-from-name" type="text" name="from_name" value="{{ old('from_name') }}"
+        <input id="sender-from-name" type="text" name="from_name" value="{{ old('from_name', $sender->from_name ?? '') }}"
                class="form-control @error('from_name') is-invalid @enderror" maxlength="255" required>
         <small class="form-text text-muted">{{ __('The name recipients will see.') }}</small>
         @error('from_name') <div class="invalid-feedback">{{ $message }}</div> @enderror
@@ -25,7 +28,7 @@
 
     <div class="form-group">
         <label for="sender-from-email">{{ __('From Email') }}</label>
-        <input id="sender-from-email" type="email" name="from_email" value="{{ old('from_email') }}"
+        <input id="sender-from-email" type="email" name="from_email" value="{{ old('from_email', $sender->from_email ?? '') }}"
                class="form-control @error('from_email') is-invalid @enderror" maxlength="255" required>
         <small class="form-text text-muted">{{ __('The email address recipients will see.') }}</small>
         @error('from_email') <div class="invalid-feedback">{{ $message }}</div> @enderror

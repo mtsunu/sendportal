@@ -88,6 +88,9 @@ Route::namespace('Workspaces')->middleware(
         $sendersRouter->get('/', 'SendersController@index')->name('index');
         $sendersRouter->get('/create', 'SendersController@create')->name('create');
         $sendersRouter->post('/', 'SendersController@store')->name('store');
+        $sendersRouter->get('/{senderId}/edit', 'SendersController@edit')->name('edit');
+        $sendersRouter->put('/{senderId}', 'SendersController@update')->name('update');
+        $sendersRouter->delete('/{senderId}', 'SendersController@destroy')->name('destroy');
     }
 );
 
