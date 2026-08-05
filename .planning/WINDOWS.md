@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 7
 waived_count: 0
 fixed_count: 1
-total_count: 6
-last_updated: 2026-08-05T14:46:07.598Z
+total_count: 8
+last_updated: 2026-08-05T14:54:43.269Z
 ---
 
 # Broken Windows Ledger
@@ -21,6 +21,8 @@ last_updated: 2026-08-05T14:46:07.598Z
 | 4 | 01 | deviation | tests/Composer/ComposerPolicyGuardTest.php |  | Independent review found and fixed per-segment route fail-open and post-probe manifest race gaps | fixed |  | 2026-07-23T07:04:54.593Z | 2026-07-23T07:05:19.932Z |
 | 5 | 05 | unrun-verify | .planning/phases/05-sender-identity-management/deferred-items.md |  | Default MySQL PHPUnit and php-cs-fixer commands unavailable in this environment; SQLite focused sender suite passes | open |  | 2026-08-05T14:46:07.538Z |  |
 | 6 | 05 | deviation | .planning/phases/05-sender-identity-management/deferred-items.md |  | Full SQLite suite has one unrelated pre-existing SetupTest failure | open |  | 2026-08-05T14:46:07.598Z |  |
+| 7 | 05 | unrun-verify | vendor/bin/php-cs-fixer |  | PHP-CS-Fixer verification could not run because vendor/bin/php-cs-fixer is unavailable locally. | open |  | 2026-08-05T14:54:43.209Z |  |
+| 8 | 05 | unmet-truth | tests/Feature/Setup/SetupTest.php | 54 | Full SQLite suite retains unrelated pre-existing SetupTest failure: expected 5 but received 0. | open |  | 2026-08-05T14:54:43.269Z |  |
 
 ````json
 [
@@ -94,6 +96,30 @@ last_updated: 2026-08-05T14:46:07.598Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-05T14:46:07.598Z",
+    "resolved_at": null
+  },
+  {
+    "id": 7,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": "vendor/bin/php-cs-fixer",
+    "line": null,
+    "description": "PHP-CS-Fixer verification could not run because vendor/bin/php-cs-fixer is unavailable locally.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-05T14:54:43.209Z",
+    "resolved_at": null
+  },
+  {
+    "id": 8,
+    "kind": "unmet-truth",
+    "phase": "05",
+    "file": "tests/Feature/Setup/SetupTest.php",
+    "line": 54,
+    "description": "Full SQLite suite retains unrelated pre-existing SetupTest failure: expected 5 but received 0.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-05T14:54:43.269Z",
     "resolved_at": null
   }
 ]

@@ -11,9 +11,9 @@ Requirements for the Saved Sender Identities milestone. Each maps to a roadmap p
 
 - [ ] **SENDER-01**: User can create a saved sender identity with a label, a From Name, and a From Email, scoped to the current workspace.
 - [ ] **SENDER-02**: User can open a dedicated Senders page (reachable from the app navigation) that lists all saved sender identities for the current workspace.
-- [ ] **SENDER-03**: User can edit an existing saved sender's label, From Name, and From Email.
-- [ ] **SENDER-04**: User can delete a saved sender.
-- [ ] **SENDER-05**: Sender input is validated (label and From Name required; From Email must be a valid email address) and senders are workspace-isolated — a user cannot view, edit, or use another workspace's senders.
+- [x] **SENDER-03**: User can edit an existing saved sender's label, From Name, and From Email.
+- [x] **SENDER-04**: User can delete a saved sender.
+- [x] **SENDER-05**: Sender input is validated (label and From Name required; From Email must be a valid email address) and senders are workspace-isolated — a user cannot view, edit, or use another workspace's senders.
 
 ### Campaign Integration
 
@@ -57,15 +57,16 @@ Which phases cover which requirements. Populated during roadmap creation.
 |-------------|-------|--------|
 | SENDER-01 | Phase 5 | Pending |
 | SENDER-02 | Phase 5 | Pending |
-| SENDER-03 | Phase 5 | Pending |
-| SENDER-04 | Phase 5 | Pending |
-| SENDER-05 | Phase 5 | Pending |
+| SENDER-03 | Phase 5 | Complete |
+| SENDER-04 | Phase 5 | Complete |
+| SENDER-05 | Phase 5 | Complete |
 | SENDER-06 | Phase 6 | Pending |
 | SENDER-07 | Phase 7 | Pending |
 | SENDER-08 | Phase 6 | Pending |
 | SENDER-09 | Phase 7 | Pending |
 
 **Coverage:**
+
 - Milestone v1.2 requirements: 9 total
 - Mapped to phases: 9/9 ✓
 - Unmapped: 0 ✓
