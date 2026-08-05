@@ -26,6 +26,21 @@ class Sender extends BaseModel
         'from_email',
     ];
 
+    /**
+     * Normalize the identity fields used by create, update, and future capture flows.
+     *
+     * @param array<string, mixed> $input
+     * @return array{label: string, from_name: string, from_email: string}
+     */
+    public static function normalizeInput(array $input): array
+    {
+        return [
+            'label' => trim((string) ($input['label'] ?? '')),
+            'from_name' => trim((string) ($input['from_name'] ?? '')),
+            'from_email' => strtolower(trim((string) ($input['from_email'] ?? ''))),
+        ];
+    }
+
     public function workspace(): BelongsTo
     {
         return $this->belongsTo(Workspace::class);

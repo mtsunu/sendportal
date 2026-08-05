@@ -236,12 +236,23 @@ class SenderControllerTest extends TestCase
             'from_email' => 'acme@example.test',
         ])->assertSessionHasErrors('from_email');
 
+        $this->put("/senders/{$existing->id}", [
+            'label' => 'Renamed Existing Sender',
+            'from_name' => ' Acme ',
+            'from_email' => ' ACME@EXAMPLE.TEST ',
+        ])->assertRedirect(route('senders.index'));
+
         $this->assertDatabaseHas('senders', [
             'id' => $candidate->id,
             'from_name' => 'Other',
             'from_email' => 'other@example.test',
         ]);
-        $this->assertDatabaseHas('senders', ['id' => $existing->id]);
+        $this->assertDatabaseHas('senders', [
+            'id' => $existing->id,
+            'label' => 'Renamed Existing Sender',
+            'from_name' => 'Acme',
+            'from_email' => 'acme@example.test',
+        ]);
     }
 
     /**

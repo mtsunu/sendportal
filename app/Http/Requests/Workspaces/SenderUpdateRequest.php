@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Workspaces;
 
+use App\Models\Sender;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -16,11 +17,7 @@ class SenderUpdateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'label' => trim((string) $this->input('label')),
-            'from_name' => trim((string) $this->input('from_name')),
-            'from_email' => strtolower(trim((string) $this->input('from_email'))),
-        ]);
+        $this->merge(Sender::normalizeInput($this->only(['label', 'from_name', 'from_email'])));
     }
 
     public function rules(): array
