@@ -14,8 +14,10 @@ class SendersController extends Controller
 {
     public function index(Request $request): ViewContract
     {
+        $workspace = $request->user()->currentWorkspace();
+
         return view('senders.index', [
-            'senders' => $request->user()->currentWorkspace()->senders()->latest()->get(),
+            'senders' => $workspace->senders()->latest()->get(),
         ]);
     }
 
@@ -26,7 +28,8 @@ class SendersController extends Controller
 
     public function store(SenderStoreRequest $request): RedirectResponse
     {
-        $request->user()->currentWorkspace()->senders()->create($request->validated());
+        $workspace = $request->user()->currentWorkspace();
+        $workspace->senders()->create($request->validated());
 
         return redirect()
             ->route('senders.index')
