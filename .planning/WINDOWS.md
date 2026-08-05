@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 5
 waived_count: 0
 fixed_count: 1
-total_count: 4
-last_updated: 2026-07-23T07:05:19.932Z
+total_count: 6
+last_updated: 2026-08-05T14:46:07.598Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,8 @@ last_updated: 2026-07-23T07:05:19.932Z
 | 2 | 01 | deviation | .planning/phases/01-constraint-resolution-and-security-control/01-02-SUMMARY.md |  | Ignore-free reporting audit exits 1 when it reports the three approved advisories; exact-ID parser treats that as required negative evidence. | open |  | 2026-07-22T16:10:45.008Z |  |
 | 3 | 01 | deviation | .planning/phases/01-constraint-resolution-and-security-control/01-03-PLAN.md |  | Task 2 outage harness used exit_status because zsh reserves status as read-only. | open |  | 2026-07-22T16:58:53.336Z |  |
 | 4 | 01 | deviation | tests/Composer/ComposerPolicyGuardTest.php |  | Independent review found and fixed per-segment route fail-open and post-probe manifest race gaps | fixed |  | 2026-07-23T07:04:54.593Z | 2026-07-23T07:05:19.932Z |
+| 5 | 05 | unrun-verify | .planning/phases/05-sender-identity-management/deferred-items.md |  | Default MySQL PHPUnit and php-cs-fixer commands unavailable in this environment; SQLite focused sender suite passes | open |  | 2026-08-05T14:46:07.538Z |  |
+| 6 | 05 | deviation | .planning/phases/05-sender-identity-management/deferred-items.md |  | Full SQLite suite has one unrelated pre-existing SetupTest failure | open |  | 2026-08-05T14:46:07.598Z |  |
 
 ````json
 [
@@ -69,6 +71,30 @@ last_updated: 2026-07-23T07:05:19.932Z
     "reason": "",
     "recorded_at": "2026-07-23T07:04:54.593Z",
     "resolved_at": "2026-07-23T07:05:19.932Z"
+  },
+  {
+    "id": 5,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": ".planning/phases/05-sender-identity-management/deferred-items.md",
+    "line": null,
+    "description": "Default MySQL PHPUnit and php-cs-fixer commands unavailable in this environment; SQLite focused sender suite passes",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-05T14:46:07.538Z",
+    "resolved_at": null
+  },
+  {
+    "id": 6,
+    "kind": "deviation",
+    "phase": "05",
+    "file": ".planning/phases/05-sender-identity-management/deferred-items.md",
+    "line": null,
+    "description": "Full SQLite suite has one unrelated pre-existing SetupTest failure",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-05T14:46:07.598Z",
+    "resolved_at": null
   }
 ]
 ````

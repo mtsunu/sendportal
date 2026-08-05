@@ -39,42 +39,53 @@ Full details archived in `.planning/milestones/v1.1-ROADMAP.md`.
 ## Phase Details
 
 ### Phase 5: Sender Identity Management
+
 **Goal**: Operators can fully manage a per-workspace library of saved sender identities (label, From Name, From Email) through a dedicated Senders page.
 **Depends on**: Nothing (first phase of this milestone; builds on existing workspace/tenancy infrastructure from v1.0/v1.1)
 **Requirements**: SENDER-01, SENDER-02, SENDER-03, SENDER-04, SENDER-05
 **Success Criteria** (what must be TRUE):
+
   1. User can create a new saved sender identity (label, From Name, From Email) scoped to the current workspace.
   2. User can open a dedicated Senders page, reachable from app navigation, listing all saved senders for the current workspace.
   3. User can edit an existing sender's label, From Name, and From Email, and the change is reflected in the Senders list.
   4. User can delete a saved sender.
   5. Invalid sender input (missing label/From Name, malformed From Email) is rejected with validation errors, and a user cannot view, edit, or delete another workspace's senders.
-**Plans**: 2 plans
+
+**Plans**: 1/2 plans executed
 Plans:
-- [ ] 05-01-PLAN.md — Establish the workspace-scoped sender create/list tracer slice
+
+- [x] 05-01-PLAN.md — Establish the workspace-scoped sender create/list tracer slice
 - [ ] 05-02-PLAN.md — Complete sender edit/delete, validation, and isolation coverage
+
 **UI hint**: yes
 
 ### Phase 6: Campaign Form Sender Selection
+
 **Goal**: Users can pick a saved sender when creating a campaign, with the selection auto-filling the From Name/From Email fields — delivered with zero edits to `vendor/mettle/sendportal-core`.
 **Depends on**: Phase 5
 **Requirements**: SENDER-06, SENDER-08
 **Success Criteria** (what must be TRUE):
+
   1. The campaign create/edit form shows a dropdown listing the current workspace's saved senders.
   2. Selecting a sender from the dropdown auto-fills the From Name and From Email fields, and both fields remain manually editable afterward.
   3. No sender is pre-selected by default when the campaign form loads.
   4. The dropdown is surfaced via a published/overridden package view plus a host-side service-provider seam — zero lines changed in `vendor/mettle/sendportal-core` (same discipline as the v1.1 `ThrottledSesAdapter` override).
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 7: Sender Auto-Capture & Data Integrity
+
 **Goal**: The sender library grows automatically from campaign activity without duplicate entries, and previously created or sent campaigns are unaffected by later sender edits or deletes.
 **Depends on**: Phase 5, Phase 6 (reuses the vendor-boundary integration seam established there; the exact auto-capture hook — Campaign model observer vs. host wrapper — is a plan-time decision, not fixed at roadmap level)
 **Requirements**: SENDER-07, SENDER-09
 **Success Criteria** (what must be TRUE):
+
   1. Creating a campaign with a From Name/From Email pair that is not already saved automatically stores it as a new sender for the workspace.
   2. Creating a campaign with a From Name/From Email pair matching an existing sender does not create a duplicate.
   3. Editing a saved sender's label/From Name/From Email does not change the From Name/From Email already stored on previously created or sent campaigns.
   4. Deleting a saved sender does not alter or break previously created or sent campaigns.
+
 **Plans**: TBD
 
 ## Progress
@@ -85,6 +96,6 @@ Plans:
 | 2. Reproducible Dependency Snapshot | v1.0 | 2/2 | Complete | 2026-07-24 |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |
 | 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete | 2026-07-25 |
-| 5. Sender Identity Management | v1.2 | 0/TBD | Not started | - |
+| 5. Sender Identity Management | v1.2 | 1/2 | In Progress|  |
 | 6. Campaign Form Sender Selection | v1.2 | 0/TBD | Not started | - |
 | 7. Sender Auto-Capture & Data Integrity | v1.2 | 0/TBD | Not started | - |
