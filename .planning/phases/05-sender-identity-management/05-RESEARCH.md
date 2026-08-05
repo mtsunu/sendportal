@@ -223,9 +223,9 @@ public function rules(): array
 
 **What goes wrong:** Equivalent addresses with whitespace or casing can produce unexpected duplicate records or inconsistent future auto-capture behavior. [ASSUMED]
 
-**Why it happens:** Phase 7 requires deduplication, while the current phase leaves normalization and duplicate policy to planning discretion; MySQL and PostgreSQL collations can compare strings differently. [VERIFIED: 05-CONTEXT.md:23-25; quote: “Duplicate sender policy and field normalization were not discussed”] [ASSUMED]
+**Why it happens:** Phase 7 requires deduplication, and MySQL/PostgreSQL collations can compare strings differently unless Phase 5 establishes one normalized comparison contract. [VERIFIED: REQUIREMENTS.md:20-21; quote: “deduplicated so an identical pair is never stored twice”] [RESOLVED]
 
-**How to avoid:** Recommended policy: trim label/name/email; lowercase the email before storage; preserve From Name casing; define the duplicate pair as normalized `(workspace_id, from_name, from_email)`. Decide whether to enforce the pair with a composite unique index now or defer enforcement to Phase 7 after confirming campaign-capture semantics. [ASSUMED]
+**How to avoid:** Resolved Phase 5 contract: trim `label`, `from_name`, and `from_email`; lowercase only `from_email` before storage; preserve From Name casing; define the duplicate pair as normalized `(workspace_id, from_name, from_email)`; and enforce that pair now with a composite unique index plus application validation that rejects duplicates. Phase 7 must reuse this normalization and uniqueness contract when auto-capturing campaign senders. [RESOLVED]
 
 **Warning signs:** Tests pass only on one database, or `Example@x.test` and `example@x.test` behave differently. [ASSUMED]
 
@@ -314,21 +314,22 @@ PHP 8.4.23 and Composer 2.10.2 are available locally. MySQL and PostgreSQL clien
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Use a `Sender` model/table and `Workspace::senders()` relation. | Architecture Patterns | Planner may need a different name, affecting routes, migration, and tests. |
-| A2 | Normalize by trimming all fields and lowercasing only `from_email`. | Common Pitfalls | Duplicate behavior and later Phase 7 auto-capture could differ. |
-| A3 | A composite uniqueness rule on normalized workspace/from-name/from-email is desirable, but its enforcement timing is a planning decision. | Common Pitfalls | Adding it now could constrain future capture semantics; omitting it could permit duplicates. |
+| A2 | Normalize by trimming all fields and lowercasing only `from_email`; preserve From Name casing. | Common Pitfalls | Resolved; create, update, and Phase 7 capture must use the same deterministic transform. |
+| A3 | Phase 5 rejects duplicate normalized `(workspace_id, from_name, from_email)` pairs through application validation and a composite unique index. | Common Pitfalls | Resolved; Phase 7 must reuse the same pair semantics rather than bypassing the constraint. |
 | A4 | A server-rendered form is smaller and safer than introducing Livewire for this CRUD. | Alternatives Considered | The UI may need more interactivity than the current shell provides. |
 | A5 | A relation-first `findOrFail` query is preferable to custom route binding. | Summary / Pattern 1 | Binding conventions could be preferred if the project adds a reusable scoped-binding abstraction. |
 
-## Open Questions
+## Resolved Planning Questions
 
-1. **What exact duplicate policy should Phase 5 lock?**
-   - What we know: Phase 7 requires identical From Name/From Email pairs to be deduplicated, while Context leaves duplicate policy and normalization to discretion. [VERIFIED: REQUIREMENTS.md:20-21; quote: “deduplicated so an identical pair is never stored twice”] [VERIFIED: 05-CONTEXT.md:23-25; quote: “Duplicate sender policy and field normalization were not discussed”]
-   - What's unclear: Whether duplicate prevention belongs in a database unique index now, application validation now, or the Phase 7 capture service only.
-   - Recommendation: Lock normalization before implementation; prefer trim + lowercase email and enforce the normalized pair at the database/application boundary if it does not conflict with the campaign capture seam. [ASSUMED]
-2. **Should create and edit use one form view or separate views?**
-   - What we know: The UI contract permits a smallest package-layout Blade approach and requires distinct create/edit copy. [VERIFIED: 05-UI-SPEC.md:80-104; quote: “Form heading (create) | `Add Sender`” and “Form heading (edit) | `Edit Sender`”]
-   - What's unclear: Whether the planner prefers one conditional form or separate create/edit views.
-   - Recommendation: Use one reusable form partial with separate page wrappers or a single page conditional; preserve the exact UI copy and server-side validation behavior. [ASSUMED]
+1. **Duplicate policy and normalization — RESOLVED**
+   - Phase 5 trims `label`, `from_name`, and `from_email`, lowercases `from_email`, and preserves From Name casing.
+   - A duplicate is the normalized `(workspace_id, from_name, from_email)` pair; label is not part of identity.
+   - Phase 5 enforces uniqueness: create and update reject a duplicate pair with validation feedback, and the database migration adds a composite unique index as the final race-safe guard.
+   - Phase 7 auto-capture must reuse this exact normalization and uniqueness contract; it must not introduce a competing comparison rule. [RESOLVED]
+
+2. **Create/edit form structure — RESOLVED**
+   - Use separate `create.blade.php` and `edit.blade.php` page wrappers with one shared `_form.blade.php` partial.
+   - The wrappers provide the distinct `Add Sender` and `Edit Sender` headings and submit labels required by the UI contract; the partial owns field markup, old values, inline errors, and shared guidance. [RESOLVED]
 
 ## Validation Architecture
 
@@ -347,11 +348,11 @@ These values are verified from the repository Composer manifest, PHPUnit config,
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| SENDER-01 | Member creates sender tied to current workspace | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter=can_create` | ❌ Wave 0 |
+| SENDER-01 | Member creates normalized, unique sender tied to current workspace | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter=can_create` | ❌ Wave 0 |
 | SENDER-02 | Active-workspace member sees navigation and only current workspace rows | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter=can_view` | ❌ Wave 0 |
 | SENDER-03 | Member edits any shared sender in current workspace | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter=can_update` | ❌ Wave 0 |
 | SENDER-04 | Member deletes sender with DELETE route | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter=can_delete` | ❌ Wave 0 |
-| SENDER-05 | Required/email validation and foreign sender 404 | feature | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter="validation|foreign"` | ❌ Wave 0 |
+| SENDER-05 | Required/email/duplicate validation, foreign sender 404, and no Phase 5 sender-use surface | feature/route contract | `vendor/bin/phpunit tests/Feature/Workspaces/SenderControllerTest.php --filter="validation|foreign|boundary"` | ❌ Wave 0 |
 
 The test names and file path are proposed; existing tests use `RefreshDatabase`, `actingAs`, named routes, and status assertions. [VERIFIED: tests/Feature/Workspaces/WorkspaceUserControllerTest.php:21-63; quote: “actingAs($user)” and “assertStatus(404)”]
 
@@ -366,6 +367,7 @@ The test names and file path are proposed; existing tests use `RefreshDatabase`,
 - [ ] Sender model/factory if the test suite needs factory-generated sender records. [ASSUMED]
 - [ ] `tests/Feature/Workspaces/SenderControllerTest.php` covering all five requirements. [ASSUMED]
 - [ ] Migration must run under the existing `TestCase::setUp()` call to `artisan('migrate')`. [VERIFIED: tests/TestCase.php:17-25; quote: “$this->artisan('migrate')->run();”]
+- [ ] The feature test must assert the Phase 5 boundary: no campaign sender-selection/auto-capture route or service is exposed here; any Phase 5 sender ID accepted by CRUD routes is resolved through the current workspace relation. [RESOLVED]
 
 ## Security Domain
 
