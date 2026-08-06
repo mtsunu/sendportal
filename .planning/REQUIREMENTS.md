@@ -9,20 +9,20 @@ Requirements for the Saved Sender Identities milestone. Each maps to a roadmap p
 
 ### Sender Management
 
-- [ ] **SENDER-01**: User can create a saved sender identity with a label, a From Name, and a From Email, scoped to the current workspace.
-- [ ] **SENDER-02**: User can open a dedicated Senders page (reachable from the app navigation) that lists all saved sender identities for the current workspace.
+- [x] **SENDER-01**: User can create a saved sender identity with a label, a From Name, and a From Email, scoped to the current workspace.
+- [x] **SENDER-02**: User can open a dedicated Senders page (reachable from the app navigation) that lists all saved sender identities for the current workspace.
 - [x] **SENDER-03**: User can edit an existing saved sender's label, From Name, and From Email.
 - [x] **SENDER-04**: User can delete a saved sender.
 - [x] **SENDER-05**: Sender input is validated (label and From Name required; From Email must be a valid email address) and senders are workspace-isolated — a user cannot view, edit, or use another workspace's senders.
 
 ### Campaign Integration
 
-- [ ] **SENDER-06**: When creating a campaign, the user can pick a saved sender from a dropdown that auto-fills the From Name and From Email fields; both fields remain manually editable and no sender is pre-selected by default.
+- [x] **SENDER-06**: When creating a campaign, the user can pick a saved sender from a dropdown that auto-fills the From Name and From Email fields; both fields remain manually editable and no sender is pre-selected by default.
 - [ ] **SENDER-07**: Creating a campaign with a From Name / From Email pair that is not already saved automatically stores it as a new sender for the workspace, deduplicated so an identical pair is never stored twice.
 
 ### Delivery Integrity
 
-- [ ] **SENDER-08**: The saved-sender UI on the campaign form is delivered with zero edits to `vendor/mettle/sendportal-core` — surfaced via a published/overridden package view and host-side seams (the same discipline as v1.1's `ThrottledSesAdapter`).
+- [x] **SENDER-08**: The saved-sender UI on the campaign form is delivered with zero edits to `vendor/mettle/sendportal-core` — surfaced via a published/overridden package view and host-side seams (the same discipline as v1.1's `ThrottledSesAdapter`).
 - [ ] **SENDER-09**: Editing or deleting a saved sender does not retroactively alter the From Name / From Email of campaigns already created or sent (sender values are copied onto each message at send time).
 
 ## Future Requirements
@@ -55,14 +55,14 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SENDER-01 | Phase 5 | Pending |
-| SENDER-02 | Phase 5 | Pending |
+| SENDER-01 | Phase 5 | Complete |
+| SENDER-02 | Phase 5 | Complete |
 | SENDER-03 | Phase 5 | Complete |
 | SENDER-04 | Phase 5 | Complete |
 | SENDER-05 | Phase 5 | Complete |
-| SENDER-06 | Phase 6 | Pending |
+| SENDER-06 | Phase 6 | Complete |
 | SENDER-07 | Phase 7 | Pending |
-| SENDER-08 | Phase 6 | Pending |
+| SENDER-08 | Phase 6 | Complete |
 | SENDER-09 | Phase 7 | Pending |
 
 **Coverage:**

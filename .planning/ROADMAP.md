@@ -71,11 +71,11 @@ Plans:
   3. No sender is pre-selected by default when the campaign form loads.
   4. The dropdown is surfaced via a published/overridden package view plus a host-side service-provider seam — zero lines changed in `vendor/mettle/sendportal-core` (same discipline as the v1.1 `ThrottledSesAdapter` override).
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 Plans:
 
 - [x] 06-01-PLAN.md — Establish the create-form sender-selection tracer and host package-view seam
-- [ ] 06-02-PLAN.md — Complete edit, empty-state, escaping, tenancy, and upgrade-boundary coverage
+- [x] 06-02-PLAN.md — Complete edit, empty-state, escaping, tenancy, and upgrade-boundary coverage
 
 **UI hint**: yes
 
@@ -102,5 +102,5 @@ Plans:
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |
 | 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete | 2026-07-25 |
 | 5. Sender Identity Management | v1.2 | 2/2 | Complete    | 2026-08-06 |
-| 6. Campaign Form Sender Selection | v1.2 | 1/2 | In Progress|  |
+| 6. Campaign Form Sender Selection | v1.2 | 2/2 | In Progress|  |
 | 7. Sender Auto-Capture & Data Integrity | v1.2 | 0/TBD | Not started | - |
