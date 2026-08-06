@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Saved Sender Identities
-current_phase: 06
-current_phase_name: campaign-form-sender-selection
-status: verifying
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-08-06T08:27:37.462Z"
+current_phase: 7
+current_phase_name: Sender Auto-Capture & Data Integrity
+status: planning
+stopped_at: Phase 7 context gathered
+last_updated: "2026-08-06T14:31:25.357Z"
 last_activity: 2026-08-06
-last_activity_desc: Phase 06 execution started
+last_activity_desc: Phase 06 complete, transitioned to Phase 7
 progress:
   total_phases: 3
   completed_phases: 2
@@ -21,25 +21,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-25)
+See: .planning/PROJECT.md (updated 2026-08-06)
 
 **Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.2: operators save a sender identity once and reuse it via a dropdown when creating a campaign.
-**Current focus:** Phase 06 — campaign-form-sender-selection
+**Current focus:** Phase 07 — Sender Auto-Capture & Data Integrity
 
 ## Current Position
 
-Phase: 06 (campaign-form-sender-selection) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-08-06 — Phase 06 execution started
+Phase: 7 — Sender Auto-Capture & Data Integrity
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-06 — Phase 06 complete, transitioned to Phase 7
 
-Progress: [██████████] 100%
+Progress: [████████████████████] 4/4 plans (100%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5
+- Total plans completed: 7
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -50,6 +50,7 @@ Progress: [██████████] 100%
 | 02 | 2 | - | - |
 | 3 | 1 | - | - |
 | 05 | 2 | - | - |
+| 06 | 2 | - | - |
 
 **Recent Trend:**
 
@@ -100,6 +101,9 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase ?]: Preserve package wrappers and form fields while using the approved Return to Campaigns copy and native blank-first picker.
 - [Phase ?]: Phase 06 Plan 02: Keep the convenience picker unnamed and change-only; package from_name/from_email remain the submission contract.
 - [Phase ?]: Phase 06 Plan 02: Treat absent sender data as an empty collection so the shared form remains manually usable.
+- [Phase 06]: Deliver campaign sender selection through a targeted host view composer and published package-view overrides; keep `vendor/mettle/sendportal-core` unchanged.
+- [Phase 06]: Keep the Saved Sender picker unnamed and change-only so the package `from_name`/`from_email` submission contract remains authoritative.
+- [Phase 06]: Phase 7 may choose a host seam for auto-capture, but must preserve the Phase 6 vendor boundary and campaign-form behavior.
 
 ### Pending Todos
 
@@ -109,7 +113,7 @@ None yet.
 
 - v1.1 Phase 4: Fixed-window edge burst — `DurationLimiter` may permit ~2N across a sub-second boundary. Ship the simple limiter; token-bucket escalation (SES-06) is deferred unless SES throttling is observed in production.
 - v1.1 Phase 4: App-level idempotency beyond `sent_at` (SES-07) is an open design call — the block-before-send invariant + 15s bound is the minimum mitigation; decide during Phase 4 planning.
-- v1.2 Phase 6/7: Vendor boundary is HARD (SENDER-08, zero `vendor/mettle/sendportal-core` edits) — dropdown surfacing requires publishing/overriding the campaign form view; auto-capture (SENDER-07) requires a host seam into campaign creation (Campaign model observer or host wrapper) since the controller is package-owned. Resolve the exact seam during Phase 6/7 planning.
+- v1.2 Phase 7: Vendor boundary remains HARD (SENDER-08, zero `vendor/mettle/sendportal-core` edits) — auto-capture (SENDER-07) requires a host seam into campaign creation (Campaign model observer or host wrapper) since the controller is package-owned. Resolve the exact seam during Phase 7 planning.
 
 ## Deferred Items
 
@@ -132,10 +136,10 @@ Environment-only checks from `04-VERIFICATION.md` (`human_needed`) — accepted 
 
 ## Session Continuity
 
-Last session: 2026-08-06T08:27:37.455Z
-Stopped at: Completed 06-02-PLAN.md
-Resume file: None
+Last session: 2026-08-06T14:31:25.340Z
+Stopped at: Phase 7 context gathered
+Resume file: .planning/phases/07-sender-auto-capture-data-integrity/07-CONTEXT.md
 
 ## Operator Next Steps
 
-- Execute Phase 6 with /gsd-execute-phase 6
+- Plan Phase 7 with /gsd-plan-phase 7
