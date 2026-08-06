@@ -33,7 +33,7 @@ Full details archived in `.planning/milestones/v1.1-ROADMAP.md`.
 **Milestone Goal:** Operators can save a sender identity (label + From Name + From Email) once and reuse it via a dropdown when creating a campaign, instead of retyping it every time.
 
 - [x] **Phase 5: Sender Identity Management** - Operators can create, list, edit, and delete workspace-scoped saved sender identities (2 plans) (completed 2026-08-06)
-- [ ] **Phase 6: Campaign Form Sender Selection** - Users can pick a saved sender from a dropdown on the campaign form, delivered with zero `vendor/` edits
+- [x] **Phase 6: Campaign Form Sender Selection** - Users can pick a saved sender from a dropdown on the campaign form, delivered with zero `vendor/` edits (completed 2026-08-06)
 - [ ] **Phase 7: Sender Auto-Capture & Data Integrity** - New senders are captured automatically (deduplicated) from campaign creation, and historical campaigns are immune to later sender edits/deletes
 
 ## Phase Details
@@ -91,7 +91,16 @@ Plans:
   3. Editing a saved sender's label/From Name/From Email does not change the From Name/From Email already stored on previously created or sent campaigns.
   4. Deleting a saved sender does not alter or break previously created or sent campaigns.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 07-01-PLAN.md — Build the after-commit Campaign auto-capture tracer with normalization, atomic deduplication, and route/race coverage
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-02-PLAN.md — Add nonblocking API failure warnings and prove campaign/message snapshot integrity after sender edits or deletes
 
 ## Progress
 
@@ -102,5 +111,5 @@ Plans:
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |
 | 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete | 2026-07-25 |
 | 5. Sender Identity Management | v1.2 | 2/2 | Complete    | 2026-08-06 |
-| 6. Campaign Form Sender Selection | v1.2 | 2/2 | In Progress|  |
+| 6. Campaign Form Sender Selection | v1.2 | 2/2 | Complete    | 2026-08-06 |
 | 7. Sender Auto-Capture & Data Integrity | v1.2 | 0/TBD | Not started | - |
