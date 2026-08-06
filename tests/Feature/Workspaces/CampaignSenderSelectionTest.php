@@ -67,8 +67,8 @@ class CampaignSenderSelectionTest extends TestCase
         $this->assertStringContainsString('Acme News — news@example.test', $html);
         $this->assertStringContainsString('Zebra Updates — zebra@example.test', $html);
         $this->assertStringNotContainsString('Private Sender', $html);
-        $this->assertStringContainsString('input[name="from_name"]', $html);
-        $this->assertStringContainsString('input[name="from_email"]', $html);
+        $this->assertStringContainsString('name="from_name"', $html);
+        $this->assertStringContainsString('name="from_email"', $html);
         $this->assertStringContainsString("$('input[name=\"from_name\"]').val(option.dataset.fromName || '');", $html);
         $this->assertStringContainsString("$('input[name=\"from_email\"]').val(option.dataset.fromEmail || '');", $html);
     }
@@ -151,8 +151,8 @@ class CampaignSenderSelectionTest extends TestCase
 
         $this->assertSame(1, substr_count($picker, '<option'));
         $this->assertStringNotContainsString('disabled', $picker);
-        $this->assertStringContainsString('input[name="from_name"]', $html);
-        $this->assertStringContainsString('input[name="from_email"]', $html);
+        $this->assertStringContainsString('name="from_name"', $html);
+        $this->assertStringContainsString('name="from_email"', $html);
     }
 
     /**

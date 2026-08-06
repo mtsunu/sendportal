@@ -8,7 +8,7 @@
     <div class="col-sm-9">
         <select id="campaign-sender-picker" class="form-control">
             <option value="">{{ __('Choose a saved sender') }}</option>
-            @foreach ($senders as $sender)
+            @foreach (($senders ?? collect()) as $sender)
                 <option
                     value="{{ $sender->id }}"
                     data-from-name="{{ $sender->from_name }}"
