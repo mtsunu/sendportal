@@ -32,7 +32,7 @@ Full details archived in `.planning/milestones/v1.1-ROADMAP.md`.
 
 **Milestone Goal:** Operators can save a sender identity (label + From Name + From Email) once and reuse it via a dropdown when creating a campaign, instead of retyping it every time.
 
-- [ ] **Phase 5: Sender Identity Management** - Operators can create, list, edit, and delete workspace-scoped saved sender identities (2 plans)
+- [x] **Phase 5: Sender Identity Management** - Operators can create, list, edit, and delete workspace-scoped saved sender identities (2 plans) (completed 2026-08-06)
 - [ ] **Phase 6: Campaign Form Sender Selection** - Users can pick a saved sender from a dropdown on the campaign form, delivered with zero `vendor/` edits
 - [ ] **Phase 7: Sender Auto-Capture & Data Integrity** - New senders are captured automatically (deduplicated) from campaign creation, and historical campaigns are immune to later sender edits/deletes
 
@@ -71,7 +71,12 @@ Plans:
   3. No sender is pre-selected by default when the campaign form loads.
   4. The dropdown is surfaced via a published/overridden package view plus a host-side service-provider seam — zero lines changed in `vendor/mettle/sendportal-core` (same discipline as the v1.1 `ThrottledSesAdapter` override).
 
-**Plans**: TBD
+**Plans**: 1/2 plans executed
+Plans:
+
+- [x] 06-01-PLAN.md — Establish the create-form sender-selection tracer and host package-view seam
+- [ ] 06-02-PLAN.md — Complete edit, empty-state, escaping, tenancy, and upgrade-boundary coverage
+
 **UI hint**: yes
 
 ### Phase 7: Sender Auto-Capture & Data Integrity
@@ -96,6 +101,6 @@ Plans:
 | 2. Reproducible Dependency Snapshot | v1.0 | 2/2 | Complete | 2026-07-24 |
 | 3. PHP 8.4 Runtime, Core Integration, and CI Verification | v1.0 | 1/1 | Complete | 2026-07-25 |
 | 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete | 2026-07-25 |
-| 5. Sender Identity Management | v1.2 | 2/2 | In Progress|  |
-| 6. Campaign Form Sender Selection | v1.2 | 0/TBD | Not started | - |
+| 5. Sender Identity Management | v1.2 | 2/2 | Complete    | 2026-08-06 |
+| 6. Campaign Form Sender Selection | v1.2 | 1/2 | In Progress|  |
 | 7. Sender Auto-Capture & Data Integrity | v1.2 | 0/TBD | Not started | - |
