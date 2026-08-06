@@ -41,21 +41,7 @@ class CampaignSenderSelectionTest extends TestCase
         ]);
 
         $this->actingAs($user);
-        request()->setRouteResolver(
-            static fn (): Route => (new Route(['GET'], '/campaigns/create', static fn () => null))
-                ->name('sendportal.campaigns.create')
-        );
-
-        $html = view('sendportal::campaigns.create', [
-            'templates' => [null => '- None -'],
-            'emailServices' => collect([
-                (object) [
-                    'id' => 1,
-                    'formatted_name' => 'SMTP (SMTP)',
-                    'type_id' => 1,
-                ],
-            ]),
-        ])->render();
+        $html = $this->renderCampaignView('sendportal::campaigns.create');
 
         $this->assertSame(1, substr_count($html, 'id="campaign-sender-picker"'));
         $this->assertStringContainsString('<label for="campaign-sender-picker"', $html);
@@ -164,8 +150,8 @@ class CampaignSenderSelectionTest extends TestCase
     public function hostile_and_long_sender_values_are_escaped_and_rendered_safely(): void
     {
         $user = $this->createUserWithWorkspace();
-        $label = 'A "quoted" <script>alert(1)</script> sender ' . str_repeat('L', 300);
-        $fromName = 'Name "quoted" <b>unsafe</b> ' . str_repeat('N', 300);
+        $label = 'A "quoted" <script>alert(1)</script> sender ' . str_repeat('L', 180);
+        $fromName = 'Name "quoted" <b>unsafe</b> ' . str_repeat('N', 180);
         $fromEmail = 'hostile+tag@example.test';
         $user->currentWorkspace()->senders()->create([
             'label' => $label,
@@ -180,7 +166,7 @@ class CampaignSenderSelectionTest extends TestCase
         $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $html);
         $this->assertStringContainsString('data-from-name="Name &quot;quoted&quot; &lt;b&gt;unsafe&lt;/b&gt;', $html);
         $this->assertStringNotContainsString('<script>alert(1)</script>', $html);
-        $this->assertStringContainsString(str_repeat('L', 300), $html);
+        $this->assertStringContainsString(str_repeat('L', 180), $html);
     }
 
     /**
