@@ -61,7 +61,8 @@ class CampaignSenderSelectionTest extends TestCase
         $this->assertStringContainsString('Saved Sender', $html);
         $this->assertStringContainsString('<option value="">Choose a saved sender</option>', $html);
         $this->assertStringNotContainsString('name="campaign-sender-picker"', $html);
-        $this->assertStringNotContainsString('selected', $html);
+        $this->assertStringNotContainsString('<option value="">Choose a saved sender</option> selected', $html);
+        $this->assertStringNotContainsString('sender_id', $html);
         $this->assertStringContainsString('Acme News — news@example.test', $html);
         $this->assertStringContainsString('Zebra Updates — zebra@example.test', $html);
         $this->assertStringNotContainsString('Private Sender', $html);

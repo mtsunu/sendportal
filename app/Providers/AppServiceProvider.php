@@ -8,8 +8,10 @@ use App\Livewire\Setup;
 use App\Mail\ThrottledSesAdapter;
 use App\Models\ApiToken;
 use App\Models\User;
+use Illuminate\Contracts\View\View as ViewContract;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\View;
 use Livewire\Livewire;
 use RuntimeException;
 use Sendportal\Base\Facades\Sendportal;
@@ -65,6 +67,19 @@ class AppServiceProvider extends ServiceProvider
         Sendportal::setHeaderHtmlContentResolver(
             static function () {
                 return view('layouts.header.userManagementHeader')->render();
+            }
+        );
+
+        View::composer(
+            ['sendportal::campaigns.create', 'sendportal::campaigns.edit'],
+            static function (ViewContract $view): void {
+                /** @var User|null $user */
+                $user = auth()->user();
+
+                $view->with(
+                    'senders',
+                    $user?->currentWorkspace()?->senders()->orderBy('label')->get() ?? collect()
+                );
             }
         );
 
