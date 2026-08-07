@@ -18,12 +18,12 @@ Requirements for the Saved Sender Identities milestone. Each maps to a roadmap p
 ### Campaign Integration
 
 - [x] **SENDER-06**: When creating a campaign, the user can pick a saved sender from a dropdown that auto-fills the From Name and From Email fields; both fields remain manually editable and no sender is pre-selected by default.
-- [ ] **SENDER-07**: Creating a campaign with a From Name / From Email pair that is not already saved automatically stores it as a new sender for the workspace, deduplicated so an identical pair is never stored twice.
+- [x] **SENDER-07**: Creating a campaign with a From Name / From Email pair that is not already saved automatically stores it as a new sender for the workspace, deduplicated so an identical pair is never stored twice.
 
 ### Delivery Integrity
 
 - [x] **SENDER-08**: The saved-sender UI on the campaign form is delivered with zero edits to `vendor/mettle/sendportal-core` — surfaced via a published/overridden package view and host-side seams (the same discipline as v1.1's `ThrottledSesAdapter`).
-- [ ] **SENDER-09**: Editing or deleting a saved sender does not retroactively alter the From Name / From Email of campaigns already created or sent (sender values are copied onto each message at send time).
+- [x] **SENDER-09**: Editing or deleting a saved sender does not retroactively alter the From Name / From Email of campaigns already created or sent (sender values are copied onto each message at send time).
 
 ## Future Requirements
 
@@ -61,9 +61,9 @@ Which phases cover which requirements. Populated during roadmap creation.
 | SENDER-04 | Phase 5 | Complete |
 | SENDER-05 | Phase 5 | Complete |
 | SENDER-06 | Phase 6 | Complete |
-| SENDER-07 | Phase 7 | Pending |
+| SENDER-07 | Phase 7 | Complete |
 | SENDER-08 | Phase 6 | Complete |
-| SENDER-09 | Phase 7 | Pending |
+| SENDER-09 | Phase 7 | Complete |
 
 **Coverage:**
 

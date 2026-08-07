@@ -91,7 +91,7 @@ Plans:
   3. Editing a saved sender's label/From Name/From Email does not change the From Name/From Email already stored on previously created or sent campaigns.
   4. Deleting a saved sender does not alter or break previously created or sent campaigns.
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 Plans:
 **Wave 1**
@@ -100,7 +100,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-02-PLAN.md — Add nonblocking API failure warnings and prove campaign/message snapshot integrity after sender edits or deletes
+- [x] 07-02-PLAN.md — Add nonblocking API failure warnings and prove campaign/message snapshot integrity after sender edits or deletes
 
 ## Progress
 
@@ -112,4 +112,4 @@ Plans:
 | 4. Coordinated SES rate limiting + 2 bug fixes | v1.1 | 1/1 | Complete | 2026-07-25 |
 | 5. Sender Identity Management | v1.2 | 2/2 | Complete    | 2026-08-06 |
 | 6. Campaign Form Sender Selection | v1.2 | 2/2 | Complete    | 2026-08-06 |
-| 7. Sender Auto-Capture & Data Integrity | v1.2 | 1/2 | In Progress|  |
+| 7. Sender Auto-Capture & Data Integrity | v1.2 | 2/2 | In Progress|  |

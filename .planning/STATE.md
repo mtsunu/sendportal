@@ -4,17 +4,17 @@ milestone: v1.2
 milestone_name: Saved Sender Identities
 current_phase: 07
 current_phase_name: sender-auto-capture-data-integrity
-status: executing
-stopped_at: Completed 07-sender-auto-capture-data-integrity-01-PLAN.md
-last_updated: "2026-08-07T01:17:03.318Z"
+status: verifying
+stopped_at: Completed 07-sender-auto-capture-data-integrity-02-PLAN.md
+last_updated: "2026-08-07T01:30:31.813Z"
 last_activity: 2026-08-07
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
-  percent: 67
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-06)
 
 Phase: 07 (sender-auto-capture-data-integrity) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-07 — Phase 07 execution started
 
-Progress: [████████████████████] 4/4 plans ([████████░░] 83%)
+Progress: [████████████████████] 4/4 plans ([██████████] 100%)
 
 ## Performance Metrics
 
@@ -76,6 +76,7 @@ Progress: [████████████████████] 4/4 pla
 | Phase 06 P01 | 6 min | 3 tasks | 5 files |
 | Phase 06 P02 | 12 min | 3 tasks | 3 files |
 | Phase 07 P01 | 12 min | 3 tasks | 4 files |
+| Phase 07 P02 | 11 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,9 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 07]: Register a creation-only Campaign observer from AppServiceProvider so direct, package web, and package API saves share one host boundary without vendor edits.
 - [Phase 07]: Derive a trimmed campaign-name label bounded to 255 UTF-8 code points, with Campaign sender as the empty-name fallback.
 - [Phase 07]: Use the persisted campaign workspace_id and the existing normalized composite unique index; duplicate rows are silent no-ops and never overwrite labels or campaign values.
+- [Phase 07]: Use request()->hasSession() to route capture failures to the existing web session warning or a fixed API request attribute. — API requests can boot the app without session middleware; the request channel must be detected by actual session availability.
+- [Phase 07]: Expose only the fixed X-SendPortal-Warning value and safe log context. — The warning and logs must never reflect sender input or raw exception messages.
+- [Phase 07]: Keep campaign and message From snapshots independent from mutable sender-library rows. — No sender_id column or campaign sender relation is needed; existing snapshot columns preserve historical behavior after sender CRUD.
 
 ### Pending Todos
 
@@ -140,8 +144,8 @@ Environment-only checks from `04-VERIFICATION.md` (`human_needed`) — accepted 
 
 ## Session Continuity
 
-Last session: 2026-08-07T01:17:03.311Z
-Stopped at: Completed 07-sender-auto-capture-data-integrity-01-PLAN.md
+Last session: 2026-08-07T01:30:31.806Z
+Stopped at: Completed 07-sender-auto-capture-data-integrity-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
