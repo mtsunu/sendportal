@@ -206,10 +206,12 @@ class CampaignSenderAutoCaptureTest extends TestCase
             ->postJson(route('sendportal.api.campaigns.store'), $payload);
 
         $response->assertCreated()
-            ->assertHeader('X-SendPortal-Warning', self::CAPTURE_WARNING)
             ->assertJsonPath('data.name', 'Failure API Campaign')
             ->assertJsonPath('data.from_name', 'Secret API Name')
             ->assertJsonPath('data.from_email', 'secret-api@example.test');
+        $this->assertSame(self::CAPTURE_WARNING, $response->headers->get('X-SendPortal-Warning'));
+        $this->assertStringNotContainsString('Secret API Name', (string) $response->headers->get('X-SendPortal-Warning'));
+        $this->assertStringNotContainsString('secret-api@example.test', (string) $response->headers->get('X-SendPortal-Warning'));
 
         $campaign = Campaign::query()->where('workspace_id', $workspaceId)->firstOrFail();
         $this->assertDatabaseCount('senders', 0);

@@ -43,25 +43,12 @@ class CampaignSenderIntegrityTest extends TestCase
             'from_email' => $originalFromEmail,
         ])->firstOrFail();
 
-        $states = [
-            'draft' => ['queued_at' => null, 'sent_at' => null],
-            'queued' => ['queued_at' => now()->subMinutes(3), 'sent_at' => null],
-            'sending' => ['queued_at' => now()->subMinutes(2), 'sent_at' => null],
-            'sent' => ['queued_at' => now()->subMinute(), 'sent_at' => now()],
-        ];
-        $messages = [];
-
-        foreach ($states as $state => $timestamps) {
-            $subscriber = Subscriber::factory()->create([
-                'workspace_id' => $workspace->id,
-                'email' => $state.'-subscriber@example.test',
-            ]);
-            $messages[$state] = $this->createMessageSnapshot($campaign, $subscriber, array_merge([
-                'subject' => 'Historical subject',
-                'from_name' => $originalFromName,
-                'from_email' => $originalFromEmail,
-            ], $timestamps));
-        }
+        $messages = $this->createHistoricalMessageStates(
+            $campaign,
+            $workspace->id,
+            $originalFromName,
+            $originalFromEmail
+        );
 
         $sender->update([
             'label' => 'Changed Sender Label',
@@ -191,9 +178,46 @@ class CampaignSenderIntegrityTest extends TestCase
             $this->assertSame(1, Message::query()->where('source_id', $campaignId)->count());
         }
 
-        $this->assertFalse(method_exists(Campaign::class, 'sender'));
-        $this->assertFalse(Schema::hasColumn('sendportal_campaigns', 'sender_id'));
-        $this->assertFalse(Schema::hasColumn('sendportal_messages', 'sender_id'));
+        $this->assertNoSenderRelationshipBoundary();
+    }
+
+    /**
+     * @return array<string, Message>
+     */
+    private function createHistoricalMessageStates(
+        Campaign $campaign,
+        int $workspaceId,
+        string $fromName,
+        string $fromEmail
+    ): array {
+        $messages = [];
+
+        foreach ($this->historicalMessageStateTimestamps() as $state => $timestamps) {
+            $subscriber = Subscriber::factory()->create([
+                'workspace_id' => $workspaceId,
+                'email' => $state.'-subscriber@example.test',
+            ]);
+            $messages[$state] = $this->createMessageSnapshot($campaign, $subscriber, array_merge([
+                'subject' => 'Historical subject',
+                'from_name' => $fromName,
+                'from_email' => $fromEmail,
+            ], $timestamps));
+        }
+
+        return $messages;
+    }
+
+    /**
+     * @return array<string, array{queued_at: \DateTimeInterface|null, sent_at: \DateTimeInterface|null}>
+     */
+    private function historicalMessageStateTimestamps(): array
+    {
+        return [
+            'draft' => ['queued_at' => null, 'sent_at' => null],
+            'queued' => ['queued_at' => now()->subMinutes(3), 'sent_at' => null],
+            'sending' => ['queued_at' => now()->subMinutes(2), 'sent_at' => null],
+            'sent' => ['queued_at' => now()->subMinute(), 'sent_at' => now()],
+        ];
     }
 
     /**
@@ -218,5 +242,12 @@ class CampaignSenderIntegrityTest extends TestCase
     private function runMessageCreation(Campaign $campaign): void
     {
         (new CreateMessages())->handle($campaign, static fn (Campaign $campaign): Campaign => $campaign);
+    }
+
+    private function assertNoSenderRelationshipBoundary(): void
+    {
+        $this->assertFalse(method_exists(Campaign::class, 'sender'));
+        $this->assertFalse(Schema::hasColumn('sendportal_campaigns', 'sender_id'));
+        $this->assertFalse(Schema::hasColumn('sendportal_messages', 'sender_id'));
     }
 }
