@@ -6,17 +6,23 @@ namespace Tests\Feature\Workspaces;
 
 use App\Models\ApiToken;
 use App\Models\Sender;
+use App\Services\Senders\CaptureCampaignSender;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Mockery;
 use Sendportal\Base\Models\Campaign;
 use Sendportal\Base\Models\CampaignStatus;
 use Sendportal\Base\Models\EmailService;
+use RuntimeException;
 use Tests\TestCase;
 
 class CampaignSenderAutoCaptureTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const CAPTURE_WARNING = 'The campaign was saved, but its sender could not be saved automatically.';
 
     /**
      * @test
@@ -144,6 +150,70 @@ class CampaignSenderAutoCaptureTest extends TestCase
             'from_name' => 'API Sender',
             'from_email' => 'api@example.test',
         ]);
+    }
+
+    /**
+     * @test
+     *
+     * D-03, D-04, and A5: web capture failure is non-blocking and exposes
+     * fixed warning/log data without sender or exception text.
+     */
+    public function a_web_capture_failure_commits_the_campaign_and_flashes_a_safe_warning(): void
+    {
+        $user = $this->createUserWithWorkspace();
+        $workspaceId = $user->currentWorkspace()->id;
+        $this->actingAs($user);
+        $payload = $this->webCampaignPayload($workspaceId, [
+            'name' => 'Failure Web Campaign',
+            'from_name' => 'Secret From Name',
+            'from_email' => 'secret-web@example.test',
+        ]);
+        $this->bindFailingCaptureService();
+        Log::spy();
+
+        $this->post(route('sendportal.campaigns.store'), $payload)
+            ->assertRedirect()
+            ->assertSessionHas('warning', self::CAPTURE_WARNING);
+
+        $campaign = Campaign::query()->where('workspace_id', $workspaceId)->firstOrFail();
+        $this->assertSame('Secret From Name', $campaign->from_name);
+        $this->assertSame('secret-web@example.test', $campaign->from_email);
+        $this->assertDatabaseCount('senders', 0);
+        $this->assertSafeWarningLog($campaign->id, $workspaceId);
+    }
+
+    /**
+     * @test
+     *
+     * D-03, D-04, and A5: API failure keeps the package response contract and
+     * uses only the additive fixed warning header.
+     */
+    public function an_api_capture_failure_commits_the_campaign_and_adds_a_safe_warning_header(): void
+    {
+        $user = $this->createUserWithWorkspace();
+        $workspaceId = $user->currentWorkspace()->id;
+        $token = ApiToken::factory()->create(['workspace_id' => $workspaceId]);
+        $this->actingAs($user);
+        $payload = $this->apiCampaignPayload($workspaceId, [
+            'name' => 'Failure API Campaign',
+            'from_name' => 'Secret API Name',
+            'from_email' => 'secret-api@example.test',
+        ]);
+        $this->bindFailingCaptureService();
+        Log::spy();
+
+        $response = $this->withToken($token->api_token)
+            ->postJson(route('sendportal.api.campaigns.store'), $payload);
+
+        $response->assertCreated()
+            ->assertHeader('X-SendPortal-Warning', self::CAPTURE_WARNING)
+            ->assertJsonPath('data.name', 'Failure API Campaign')
+            ->assertJsonPath('data.from_name', 'Secret API Name')
+            ->assertJsonPath('data.from_email', 'secret-api@example.test');
+
+        $campaign = Campaign::query()->where('workspace_id', $workspaceId)->firstOrFail();
+        $this->assertDatabaseCount('senders', 0);
+        $this->assertSafeWarningLog($campaign->id, $workspaceId);
     }
 
     /**
@@ -454,6 +524,31 @@ class CampaignSenderAutoCaptureTest extends TestCase
             'send_to_all' => 1,
             'scheduled_at' => now()->toISOString(),
         ], $overrides);
+    }
+
+    private function bindFailingCaptureService(): void
+    {
+        $mock = Mockery::mock(CaptureCampaignSender::class);
+        $mock->shouldReceive('handle')
+            ->once()
+            ->andThrow(new RuntimeException('secret sender payload must not be logged', 409));
+
+        $this->app->instance(CaptureCampaignSender::class, $mock);
+    }
+
+    private function assertSafeWarningLog(int $campaignId, int $workspaceId): void
+    {
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->with('campaign_sender_auto_capture_failed', Mockery::on(static function (array $context) use ($campaignId, $workspaceId): bool {
+                return $context['campaign_id'] === $campaignId
+                    && $context['workspace_id'] === $workspaceId
+                    && $context['exception_class'] === RuntimeException::class
+                    && $context['exception_code'] === 409
+                    && ! array_key_exists('message', $context)
+                    && ! array_key_exists('from_name', $context)
+                    && ! array_key_exists('from_email', $context);
+            }));
     }
 
     private function concurrencyConnection(): \Illuminate\Database\Connection
