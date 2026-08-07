@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Saved Sender Identities
-current_phase: 7
-current_phase_name: Sender Auto-Capture & Data Integrity
+current_phase: 07
+current_phase_name: sender-auto-capture-data-integrity
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-08-06T16:59:27.730Z"
-last_activity: 2026-08-06
-last_activity_desc: Phase 06 complete, transitioned to Phase 7
+stopped_at: Completed 07-sender-auto-capture-data-integrity-01-PLAN.md
+last_updated: "2026-08-07T01:17:03.318Z"
+last_activity: 2026-08-07
+last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 67
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-06)
 
 **Core value:** Operators can install and run SendPortal reliably on PHP 8.4 without bypassing dependency or platform requirements. For v1.2: operators save a sender identity once and reuse it via a dropdown when creating a campaign.
-**Current focus:** Phase 07 — Sender Auto-Capture & Data Integrity
+**Current focus:** Phase 07 — sender-auto-capture-data-integrity
 
 ## Current Position
 
-Phase: 7 — Sender Auto-Capture & Data Integrity
-Plan: Not started
+Phase: 07 (sender-auto-capture-data-integrity) — EXECUTING
+Plan: 2 of 2
 Status: Ready to execute
-Last activity: 2026-08-06 — Phase 06 complete, transitioned to Phase 7
+Last activity: 2026-08-07 — Phase 07 execution started
 
-Progress: [████████████████████] 4/4 plans (100%)
+Progress: [████████████████████] 4/4 plans ([████████░░] 83%)
 
 ## Performance Metrics
 
@@ -75,6 +75,7 @@ Progress: [████████████████████] 4/4 pla
 | Phase 05 P02 | 13 min | 3 tasks | 9 files |
 | Phase 06 P01 | 6 min | 3 tasks | 5 files |
 | Phase 06 P02 | 12 min | 3 tasks | 3 files |
+| Phase 07 P01 | 12 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,9 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 06]: Deliver campaign sender selection through a targeted host view composer and published package-view overrides; keep `vendor/mettle/sendportal-core` unchanged.
 - [Phase 06]: Keep the Saved Sender picker unnamed and change-only so the package `from_name`/`from_email` submission contract remains authoritative.
 - [Phase 06]: Phase 7 may choose a host seam for auto-capture, but must preserve the Phase 6 vendor boundary and campaign-form behavior.
+- [Phase 07]: Register a creation-only Campaign observer from AppServiceProvider so direct, package web, and package API saves share one host boundary without vendor edits.
+- [Phase 07]: Derive a trimmed campaign-name label bounded to 255 UTF-8 code points, with Campaign sender as the empty-name fallback.
+- [Phase 07]: Use the persisted campaign workspace_id and the existing normalized composite unique index; duplicate rows are silent no-ops and never overwrite labels or campaign values.
 
 ### Pending Todos
 
@@ -136,9 +140,9 @@ Environment-only checks from `04-VERIFICATION.md` (`human_needed`) — accepted 
 
 ## Session Continuity
 
-Last session: 2026-08-06T14:31:25.340Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-sender-auto-capture-data-integrity/07-CONTEXT.md
+Last session: 2026-08-07T01:17:03.311Z
+Stopped at: Completed 07-sender-auto-capture-data-integrity-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
