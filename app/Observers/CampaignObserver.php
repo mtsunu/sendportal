@@ -12,6 +12,8 @@ use Throwable;
 
 class CampaignObserver implements ShouldHandleEventsAfterCommit
 {
+    public const WARNING_ATTRIBUTE = 'sendportal.sender_capture_warning';
+
     private const CAPTURE_WARNING = 'The campaign was saved, but its sender could not be saved automatically.';
 
     public function __construct(private readonly CaptureCampaignSender $captureCampaignSender)
@@ -30,8 +32,12 @@ class CampaignObserver implements ShouldHandleEventsAfterCommit
                 'exception_code' => (int) $exception->getCode(),
             ]);
 
-            if (app()->bound('session')) {
-                app('session')->flash('warning', self::CAPTURE_WARNING);
+            $request = request();
+
+            if ($request->hasSession()) {
+                $request->session()->flash('warning', self::CAPTURE_WARNING);
+            } else {
+                $request->attributes->set(self::WARNING_ATTRIBUTE, true);
             }
         }
     }

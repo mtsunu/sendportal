@@ -12,10 +12,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Mockery;
+use RuntimeException;
 use Sendportal\Base\Models\Campaign;
 use Sendportal\Base\Models\CampaignStatus;
 use Sendportal\Base\Models\EmailService;
-use RuntimeException;
 use Tests\TestCase;
 
 class CampaignSenderAutoCaptureTest extends TestCase
