@@ -1,8 +1,8 @@
 ---
-status: investigating
+status: complete
 trigger: "CI reaches dependency audit but skips the Phase 07 MySQL and PostgreSQL tests"
 created: 2026-09-19T16:05:00Z
-updated: 2026-09-19T16:20:00Z
+updated: 2026-09-19T16:19:16Z
 ---
 
 # CI Dependency Audit
@@ -17,7 +17,7 @@ updated: 2026-09-19T16:20:00Z
 ## Current Focus
 
 - hypothesis: The CI failure is caused by stale locked patch versions, not by Phase 07 application code. Safe patch releases are already permitted by the existing constraints.
-- next_action: Make the Phase 07 boundary fixture respect the campaign schema and isolate environment-sensitive auth route tests, then push and confirm both supported-driver jobs pass.
+- next_action: None; CI run 35454371717 passed the complete dependency gate and both supported-driver database testsuite steps.
 
 ## Evidence
 
@@ -48,6 +48,15 @@ updated: 2026-09-19T16:20:00Z
 
 - root_cause: `.env.example` is copied before the suite and supplies the local Homestead username. The workflow set only connection/host/port, so Laravel retained `homestead` instead of the service's `laravel` user.
 - fix: Set `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` explicitly in both database test steps, matching their service definitions. This keeps the local Homestead defaults unchanged.
+
+## Completion
+
+- timestamp: 2026-09-19T16:19:16Z
+  source: GitHub Actions run 35454371717
+  observation: The complete CI job succeeded. `Audit dependencies`, `Run Testsuite against MySQL`, and `Run Testsuite against Postgres` all completed successfully.
+
+- fix: Adjust the Phase 07 UTF-8 boundary fixture to exercise sender-label truncation without inserting an invalid campaign name, and isolate environment-sensitive auth route tests from PHPUnit process-global state.
+- verification: Local full suite passed with 102 tests and 336 assertions; the focused Phase 07 suites passed with 20 tests and 82 assertions plus one intentional SQLite concurrency skip.
 
 - timestamp: 2026-09-19T16:20:00Z
   source: GitHub Actions run 35453478706 MySQL log and local full suite

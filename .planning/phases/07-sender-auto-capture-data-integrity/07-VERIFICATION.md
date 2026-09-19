@@ -1,25 +1,21 @@
 ---
 phase: 07-sender-auto-capture-data-integrity
-verified: 2026-08-07T01:28:33Z
-status: human_needed
-score: 5/6 must-haves verified
-behavior_unverified: 1
+verified: 2026-09-19T16:19:16Z
+status: passed
+score: 6/6 must-haves verified
+behavior_unverified: 0
 overrides_applied: 0
-behavior_unverified_items:
-  - "Cross-process duplicate convergence still needs execution on the CI MySQL and PostgreSQL services; local SQLite intentionally skips this race test."
-human_verification:
-  - test: "Run the focused sender-capture and integrity suites in the CI MySQL and PostgreSQL jobs, including the cross-process concurrency case."
-    expected: "Both database drivers create two campaigns successfully, converge to exactly one normalized sender row, and emit no duplicate capture warning."
-    why_human: "Those supported database services are not available in this local environment, and SQLite does not exercise the same unique-insert race semantics."
+behavior_unverified_items: []
+human_verification: []
 ---
 
 # Phase 07: Sender Auto-Capture & Data Integrity Verification Report
 
 **Phase Goal:** The sender library grows automatically from campaign activity without duplicate entries, and previously created or sent campaigns are unaffected by later sender edits or deletes.
 
-**Verified:** 2026-08-07T01:28:33Z
+**Verified:** 2026-09-19T16:19:16Z
 
-**Status:** HUMAN NEEDED
+**Status:** PASSED
 
 ## Goal Achievement
 
@@ -30,9 +26,9 @@ human_verification:
 | 3 | Editing or deleting a sender leaves campaign and existing message From snapshots unchanged for draft, queued, sending, and sent records. | VERIFIED | `sender_lifecycle_changes_do_not_mutate_historical_snapshots` passes four explicit timestamp-state fixtures and confirms rows remain queryable after sender deletion. |
 | 4 | Later message generation reads stored campaign From fields, while a direct campaign From edit controls only messages generated afterward. | VERIFIED | `later_message_generation_uses_the_current_campaign_snapshot` passes against the installed SendPortal Core `CreateMessages` pipeline. |
 | 5 | Blank/null inputs, normalized duplicates, deleted-pair recreation, equal/adjacent independent rows, and the no-relation/vendor boundary remain explicit. | VERIFIED | Focused suite passes; schema and model assertions find no `sender_id` column or Campaign `sender` relation, and `git diff --name-only -- vendor/mettle/sendportal-core` is empty. |
-| 6 | Concurrent supported-driver duplicate campaign creation converges to one sender with no warning. | HUMAN NEEDED | The process-level test exists with a start barrier and separate connections, but SQLite skips it; local MySQL is unavailable and `pg_isready` is not installed. |
+| 6 | Concurrent supported-driver duplicate campaign creation converges to one sender with no warning. | VERIFIED | GitHub Actions run `35454371717` passed both the MySQL and PostgreSQL testsuite steps, including the supported-driver concurrency coverage. |
 
-**Score:** 5/6 truths verified; 1 requires CI database execution.
+**Score:** 6/6 truths verified.
 
 ## Required Artifacts
 
@@ -66,7 +62,7 @@ human_verification:
 | Check | Result | Status |
 |---|---|---|
 | `DB_CONNECTION=sqlite DB_DATABASE=':memory:' vendor/bin/phpunit tests/Feature/Workspaces/CampaignSenderAutoCaptureTest.php tests/Feature/Workspaces/CampaignSenderIntegrityTest.php --testdox` | 20 tests, 82 assertions, 1 intentional SQLite concurrency skip | PASS |
-| `DB_CONNECTION=sqlite DB_DATABASE=':memory:' vendor/bin/phpunit` | 98 tests, 309 assertions, 6 skips; one Composer-manifest guard failure caused by pre-existing modified `composer.json` and `composer.lock` | PRE-EXISTING / NON-PHASE |
+| `DB_CONNECTION=sqlite DB_DATABASE=':memory:' vendor/bin/phpunit` | 102 tests, 336 assertions, 1 intentional SQLite concurrency skip | PASS |
 | `vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --diff --dry-run --sequential` | Found 0 of 149 files that can be fixed | PASS |
 | PHP lint on changed implementation/tests | No syntax errors | PASS |
 | `git diff --check` | No whitespace errors | PASS |
@@ -75,15 +71,14 @@ human_verification:
 
 ## Human Verification Required
 
-1. **Supported-driver concurrency:** Run the focused suites in the CI MySQL and PostgreSQL jobs. Confirm both child campaign writes succeed, exactly one normalized sender row exists, and neither child logs `campaign_sender_auto_capture_failed`.
+[none]
 
 ## Gaps Summary
 
-The implementation satisfies the phase goal for all locally executable behavior. The remaining item is environment-dependent rather than an identified code gap: SQLite cannot validate the intended MySQL/PostgreSQL race, and those local services are unavailable. The full-suite Composer-manifest failure is pre-existing working-tree state and does not involve Phase 07 or vendor files.
-
-The phase should remain in verification until the CI database matrix confirms the race test.
+The implementation satisfies the phase goal. Local SQLite verification covers the full suite and intentionally skips only the SQLite-incompatible concurrency race; GitHub Actions run `35454371717` supplies the supported-driver proof with passing MySQL and PostgreSQL testsuite steps. The dependency and CI setup fixes are recorded in `.planning/debug/ci-dependency-audit.md`.
 
 ---
 
-_Verified: 2026-08-07T01:28:33Z_  
-_Verifier: inline phase gate after the scoped verifier exceeded two bounded waits without producing an artifact_
+_Verified: 2026-09-19T16:19:16Z_
+
+_Verifier: CI-backed phase verification after MySQL and PostgreSQL tests passed_
