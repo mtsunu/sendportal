@@ -6,8 +6,13 @@ namespace Tests\Feature\Auth;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\WithFaker;
+use Illuminate\Support\Env;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Tests\TestCase;
 
+#[RunTestsInSeparateProcesses]
+#[PreserveGlobalState(false)]
 class AuthConfigDisabledTest extends TestCase
 {
     use RefreshDatabase;
@@ -17,6 +22,11 @@ class AuthConfigDisabledTest extends TestCase
     {
         putenv('SENDPORTAL_REGISTER=false');
         putenv('SENDPORTAL_PASSWORD_RESET=false');
+        $_ENV['SENDPORTAL_REGISTER'] = 'false';
+        $_ENV['SENDPORTAL_PASSWORD_RESET'] = 'false';
+        $_SERVER['SENDPORTAL_REGISTER'] = 'false';
+        $_SERVER['SENDPORTAL_PASSWORD_RESET'] = 'false';
+        Env::enablePutenv();
 
         parent::setUp();
     }

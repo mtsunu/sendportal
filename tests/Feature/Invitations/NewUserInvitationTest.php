@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\WithFaker;
+use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
@@ -20,6 +21,9 @@ class NewUserInvitationTest extends TestCase
     public function setUp(): void
     {
         putenv('SENDPORTAL_REGISTER=true');
+        $_ENV['SENDPORTAL_REGISTER'] = 'true';
+        $_SERVER['SENDPORTAL_REGISTER'] = 'true';
+        Env::enablePutenv();
 
         parent::setUp();
     }

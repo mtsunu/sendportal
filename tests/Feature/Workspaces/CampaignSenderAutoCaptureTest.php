@@ -357,11 +357,14 @@ class CampaignSenderAutoCaptureTest extends TestCase
         $user = $this->createUserWithWorkspace();
         $name = str_repeat('🚀', 300);
 
-        $this->createCampaign($user->currentWorkspace()->id, [
+        $campaign = new Campaign([
+            'workspace_id' => $user->currentWorkspace()->id,
             'name' => $name,
             'from_name' => 'Long Label Sender',
             'from_email' => 'long-label@example.test',
         ]);
+
+        app(CaptureCampaignSender::class)->handle($campaign);
 
         $sender = Sender::query()->firstOrFail();
         $this->assertSame(255, Str::length($sender->label));
