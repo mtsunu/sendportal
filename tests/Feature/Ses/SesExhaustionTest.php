@@ -37,6 +37,7 @@ final class SesExhaustionTest extends SesTestCase
         $client->shouldReceive('getSendQuota')->andReturn(new Result(['MaxSendRate' => -1]));
         $client->shouldReceive('sendEmail')->andReturnUsing(function () use (&$calls, $ex) {
             $calls++;
+
             if ($calls < 2) {
                 throw $ex;
             }
@@ -89,6 +90,7 @@ final class SesExhaustionTest extends SesTestCase
 
         // Mirror DispatchMessage::handle() ordering: send() then markSent().
         $marked = false;
+
         try {
             $id = $this->send($adapter);
             $marked = true; // stands in for markSent($message, $id) — must be unreachable
@@ -119,6 +121,7 @@ final class SesExhaustionTest extends SesTestCase
         $adapter = $this->throttledAdapter($client, [], uniqid('budget', true));
 
         $start = microtime(true);
+
         try {
             $this->send($adapter);
             self::fail('Expected SesSendThrottledException.');

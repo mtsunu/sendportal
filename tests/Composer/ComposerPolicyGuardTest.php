@@ -2612,18 +2612,19 @@ function auditRoutes(string $repositoryRoot): array
             : ($sourceKind === 'docker'
                 ? dockerCommandScalars($contents)
                 : array_map(
-                static fn (array $logicalLine): array => [
-                    'line' => $logicalLine['line'],
-                    'logical' => $logicalLine['text'],
-                    'text' => unquoteYamlCommandScalar($logicalLine['text']),
-                    'scalar' => 'shell-line',
-                    'parse_error' => null,
-                ],
-                normalizedLogicalLines($contents),
-            ));
+                    static fn (array $logicalLine): array => [
+                        'line' => $logicalLine['line'],
+                        'logical' => $logicalLine['text'],
+                        'text' => unquoteYamlCommandScalar($logicalLine['text']),
+                        'scalar' => 'shell-line',
+                        'parse_error' => null,
+                    ],
+                    normalizedLogicalLines($contents),
+                ));
 
         foreach ($commands as $command) {
             $commandRecordStart = count($records);
+
             if ($command['parse_error'] !== null) {
                 if (routeAuditMarker($command['text']) || routeAuditMarker($command['logical'])) {
                     $records[] = [

@@ -26,7 +26,7 @@ Operators can install and run SendPortal reliably on PHP 8.4 without bypassing d
 
 ## Current State
 
-**Milestone v1.2 Saved Sender Identities — planning (started 2026-07-25).** Defining requirements.
+**Milestone v1.2 Saved Sender Identities — Phase 6 complete (started 2026-07-25).** Phase 7 remains to be planned for auto-capture and historical data integrity.
 
 Prior milestones (both shipped 2026-07-25):
 - **v1.0 PHP 8.4 Compatibility** — installable/operational on PHP 8.4; committed lock; live `:8.4` CI gate.
@@ -100,6 +100,9 @@ _Deferred to a future quality/reliability milestone:_
 | Ship SES pacing + bug fixes as a host-level adapter override (`ThrottledSesAdapter` rebound via `MailAdapterFactory::$adapterMap`) | Never edit `vendor/mettle/sendportal-core`; keep the dependency upgradable and the v1.0 install contract intact. | ✓ Good — v1.1 shipped with zero vendor edits |
 | Use Laravel's bundled `Redis::throttle()` `DurationLimiter` over the shared connection as the cross-process pacing primitive | Zero new Composer dependency; genuinely cross-process via a shared Redis key. | ✓ Good — proven cross-process by a ≥2-worker test (v1.1); ⚠️ fixed-window edge burst possible → token-bucket (SES-06) deferred unless SES throttling is observed |
 | Do all waiting BEFORE the SES call; bounded block `max_block_seconds=15 << timeout 60` | Prevents double-send between `send()` and `markSent()`; Horizon `tries=3` is the single retry owner. | ✓ Good — no-double-send proven by fault injection (SES-05, v1.1) |
+| Surface saved sender selection through a targeted host view composer and published SendPortal Core campaign-view overrides | The campaign controller and views are package-owned; the host must preserve upgradeability and the hard zero-vendor-edit boundary. | ✓ Good — Phase 6 browser and package-boundary verification passed with no vendor changes |
+| Keep the Saved Sender picker unnamed and change-only | It is a convenience control; the package's existing editable `from_name` and `from_email` fields remain the submission contract. | ✓ Good — Phase 6 rendered and browser verification passed |
+| Treat missing sender data as an empty collection | A workspace with no saved senders must retain a usable blank picker and ordinary manual campaign entry. | ✓ Good — Phase 6 focused coverage passed |
 
 ## Evolution
 
@@ -119,4 +122,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-25 — started v1.2 Saved Sender Identities milestone*
+*Last updated: 2026-08-06 after Phase 6 — campaign form sender selection verified*

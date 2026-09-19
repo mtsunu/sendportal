@@ -323,17 +323,15 @@ This uses the existing jQuery loaded at `base.blade.php:27` and the existing for
 | A4 | The override should omit the picker `name` attribute rather than submit a non-contract field. | Pattern 2 | A package component may be preferred for visual consistency, but its required `name` makes omission less direct. |
 | A5 | The package's current view names remain stable across future upgrades. | Pitfalls | A package upgrade can break the composer; lock and smoke tests must catch it. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the publish operation copy the whole package view tree or only the three campaign files?**
    - What we know: The provider publishes the whole package `resources/views` directory to `resources/views/vendor/sendportal`. [VERIFIED: `vendor/mettle/sendportal-core/src/SendportalBaseServiceProvider.php:28-30`]
-   - What's unclear: The repository currently has no `resources/views/vendor/sendportal` override tree, and copying the whole tree creates more upgrade drift.
-   - Recommendation: Plan the smallest three-file override needed by the shared form, preserve exact wrapper content, and document the publish command/commit behavior; do not publish unrelated views.
+   - Resolution: Use the smallest three-file override needed by the shared form (`campaigns/create.blade.php`, `campaigns/edit.blade.php`, and `campaigns/partials/form.blade.php`). Preserve exact wrapper content and do not copy unrelated package views, minimizing upgrade drift.
 
 2. **Can the existing test harness render package campaign create/edit pages with valid package fixtures?**
    - What we know: PHPUnit and the package are installed; the package controller requires email services/templates and the campaign form requires campaign fields. [VERIFIED: `CampaignsController.php:92-103,129-141`; `CampaignStoreRequest.php:22-60`]
-   - What's unclear: No canonical host campaign selection test or campaign fixture was found in the requested Phase 5 artifacts.
-   - Recommendation: Start with a feature test against the real named routes; if fixture setup is expensive, test the overridden views with explicit `view(...)->render()` data while retaining at least one route smoke test. [ASSUMED]
+   - Resolution: Use deterministic named-view rendering with package-shaped template/email-service data and a lightweight campaign object for edit coverage. Retain `php artisan route:list --path=campaigns -v` as the route smoke check; do not add campaign persistence fixtures because this phase is presentation-only.
 
 ## Sources
 

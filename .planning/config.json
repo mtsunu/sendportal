@@ -1,5 +1,5 @@
 {
-  "model_profile": "adaptive",
+  "model_profile": "inherit",
   "commit_docs": true,
   "parallelization": true,
   "search_gitignored": false,
@@ -90,7 +90,7 @@
     "source_grounding_authority": "grep"
   },
   "resolve_model_ids": "omit",
-  "runtime": "claude",
+  "runtime": "codex",
   "mode": "yolo",
   "granularity": "standard",
   "graphify": {

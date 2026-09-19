@@ -124,6 +124,7 @@ final class ThrottledSesAdapter extends SesMailAdapter
         $ttl = (int) config('sendportal-throttle.rate_cache_ttl', 300);
 
         $cached = Cache::get($cacheKey);
+
         if ($cached !== null) {
             return (int) $cached;
         }
@@ -141,6 +142,7 @@ final class ThrottledSesAdapter extends SesMailAdapter
         try {
             // Double-check under the lock in case a peer just populated it.
             $cached = Cache::get($cacheKey);
+
             if ($cached !== null) {
                 return (int) $cached;
             }

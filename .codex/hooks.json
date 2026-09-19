@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/meigire/Library/Application Support/Herd/config/nvm/versions/node/v24.19.0/bin/node\" \"/Users/meigire/Work/idai-jatim/sendportal/.codex/hooks/gsd-check-update.js\""
+          }
+        ]
+      }
+    ]
+  }
+}
