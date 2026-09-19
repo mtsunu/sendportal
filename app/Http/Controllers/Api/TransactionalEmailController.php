@@ -16,8 +16,17 @@ class TransactionalEmailController extends Controller
     public function store(TransactionalEmailRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $mail = Mail::to($data['to']);
 
-        Mail::to($data['to'])->queue(new TransactionalEmail(
+        if (! empty($data['cc'])) {
+            $mail->cc($data['cc']);
+        }
+
+        if (! empty($data['bcc'])) {
+            $mail->bcc($data['bcc']);
+        }
+
+        $mail->queue(new TransactionalEmail(
             emailSubject: $data['subject'],
             body: $data['body'],
             htmlBody: $data['html'] ?? null,

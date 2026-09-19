@@ -22,7 +22,7 @@ class TransactionalEmailControllerTest extends TestCase
     }
 
     /** @test */
-    public function a_valid_workspace_token_queues_a_transactional_email(): void
+    public function a_valid_workspace_token_queues_a_transactional_email_with_copy_recipients(): void
     {
         $user = $this->createUserWithWorkspace();
         $token = ApiToken::factory()->create([
@@ -33,6 +33,8 @@ class TransactionalEmailControllerTest extends TestCase
             'subject' => 'Payment received',
             'body' => 'Your payment has been received.',
             'html' => '<p>Your payment has been received.</p>',
+            'cc' => ['manager@example.test', 'finance@example.test'],
+            'bcc' => 'audit@example.test',
         ];
 
         $response = $this->withToken($token->api_token)
@@ -45,9 +47,34 @@ class TransactionalEmailControllerTest extends TestCase
 
         Mail::assertQueued(TransactionalEmail::class, function (TransactionalEmail $mail) use ($payload): bool {
             return $mail->hasTo($payload['to'])
+                && $mail->hasCc($payload['cc'][0])
+                && $mail->hasCc($payload['cc'][1])
+                && $mail->hasBcc($payload['bcc'])
                 && $mail->emailSubject === $payload['subject']
                 && $mail->body === $payload['body']
                 && $mail->htmlBody === $payload['html'];
+        });
+    }
+
+    /** @test */
+    public function a_transactional_email_without_copy_recipients_still_queues(): void
+    {
+        $user = $this->createUserWithWorkspace();
+        $token = ApiToken::factory()->create([
+            'workspace_id' => $user->currentWorkspace()->id,
+        ]);
+
+        $response = $this->withToken($token->api_token)
+            ->postJson(route('sendportal.api.notifications.email'), [
+                'to' => 'recipient@example.test',
+                'subject' => 'Payment received',
+                'body' => 'Your payment has been received.',
+            ]);
+
+        $response->assertAccepted();
+
+        Mail::assertQueued(TransactionalEmail::class, function (TransactionalEmail $mail): bool {
+            return $mail->cc === [] && $mail->bcc === [];
         });
     }
 
@@ -77,12 +104,16 @@ class TransactionalEmailControllerTest extends TestCase
                 'to' => 'not-an-email',
                 'subject' => '',
                 'body' => '',
+                'cc' => ['not-a-cc-email'],
+                'bcc' => 'not-a-bcc-email',
             ]);
 
         $response->assertUnprocessable()->assertJsonValidationErrors([
             'to',
             'subject',
             'body',
+            'cc.0',
+            'bcc.0',
         ]);
         Mail::assertNothingQueued();
     }
