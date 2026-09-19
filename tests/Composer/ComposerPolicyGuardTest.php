@@ -1874,6 +1874,15 @@ function isTrustedPhpAuditSource(string $path): bool
         || str_starts_with($path, 'storage/framework/');
 }
 
+function isRouteAuditExcludedPath(string $path): bool
+{
+    return str_starts_with($path, '.codex/')
+        || str_starts_with($path, '.opencode/')
+        || str_starts_with($path, 'graphify-out/')
+        || str_starts_with($path, '.phpunit.cache/')
+        || $path === '.php-cs-fixer.cache';
+}
+
 function routeAuditMarker(string $source): bool
 {
     try {
@@ -2492,7 +2501,7 @@ function auditRoutes(string $repositoryRoot): array
     $records = [];
 
     foreach (trackedFiles($repositoryRoot) as $path) {
-        if (str_starts_with($path, '.planning/') || str_starts_with($path, 'tests/')) {
+        if (str_starts_with($path, '.planning/') || str_starts_with($path, 'tests/') || isRouteAuditExcludedPath($path)) {
             continue;
         }
 
@@ -3351,6 +3360,11 @@ PHP;
 
     $unknownSourceRoot = initializeFixtureRepositoryFiles($repositoryRoot, [
         'infra/dependency-route.txt' => 'composer install',
+        '.codex/ignored-route.md' => 'Use bash or exec when running composer install.',
+        '.opencode/ignored-route.md' => 'Use bash or exec when running composer install.',
+        'graphify-out/ignored-route.md' => 'Use bash or exec when running composer install.',
+        '.phpunit.cache/test-results' => 'exec composer install',
+        '.php-cs-fixer.cache' => 'exec composer install',
         '.planning/debug/ignored-route.txt' => 'composer install',
         'tests/Composer/ignored-route.txt' => 'composer install',
     ]);
@@ -3362,6 +3376,7 @@ PHP;
             && $record['classification'] === 'unclassified'));
         assertTrue(count($unknown) === 1, 'A marker-bearing tracked source outside an approved provenance kind must produce exactly one source-level unclassified record.');
         assertTrue(! (bool) array_filter($records, static fn (array $record): bool => str_starts_with($record['path'], '.planning/') || str_starts_with($record['path'], 'tests/')), 'Planning and test fixture material must remain absent from production route evidence.');
+        assertTrue(! (bool) array_filter($records, static fn (array $record): bool => isRouteAuditExcludedPath($record['path'])), 'Committed tooling and generated artifacts must remain absent from production route evidence.');
         assertTrue(routeAuditFailures($records) !== [], 'An unknown marker-bearing source must fail the route audit.');
     } finally {
         removeDirectory($unknownSourceRoot);
