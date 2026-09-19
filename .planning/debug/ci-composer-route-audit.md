@@ -2,7 +2,7 @@
 status: complete
 trigger: "CI fails before Phase 07 database tests because Composer route audit rejects tracked .codex tooling files"
 created: 2026-09-19T15:36:00Z
-updated: 2026-09-19T15:50:00Z
+updated: 2026-09-19T16:05:00Z
 ---
 
 # CI Composer Route Audit
@@ -18,7 +18,7 @@ updated: 2026-09-19T15:50:00Z
 ## Current Focus
 
 - hypothesis: The production route audit scans tracked project tooling as if it were an approved Composer-bearing execution source; the safe fix is to align source provenance boundaries with the intended Composer-policy scope while preserving fail-closed behavior for application/deployment route sources.
-- next_action: Push the scoped route-audit fix and verify the GitHub Actions MySQL/PostgreSQL steps reach and pass.
+- next_action: Keep the route-audit fix as a completed prerequisite while resolving the separate dependency-audit blocker exposed by the next CI run.
 
 ## Evidence
 
@@ -33,6 +33,10 @@ updated: 2026-09-19T15:50:00Z
 - timestamp: 2026-09-19T15:50:00Z
   source: local focused regression and Composer policy checks
   observation: The explicit exclusion boundary removes committed `.codex/`, `.opencode/`, `graphify-out/`, `.phpunit.cache/`, and `.php-cs-fixer.cache` artifacts from production route evidence; `infra/` remains a failing unknown-source fixture. Route audit and full Composer policy guard both pass.
+
+- timestamp: 2026-09-19T16:05:00Z
+  source: GitHub Actions run 35452803770
+  observation: The route-audit step passed after commit `f7f4c13`; the next `Audit dependencies` step failed, so database jobs were still skipped. This confirms the route-audit fix is effective and exposes a separate dependency blocker.
 
 ## Eliminated
 
