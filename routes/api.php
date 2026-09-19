@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\TransactionalEmailController;
 use App\Http\Middleware\AttachSenderCaptureWarningHeader;
 use App\Http\Middleware\RequireWorkspace;
 use Illuminate\Support\Facades\Route;
@@ -13,6 +14,9 @@ Route::middleware([
     AttachSenderCaptureWarningHeader::class,
 ])->group(function () {
     // Auth'd API routes (workspace-level auth!).
+    Route::post('v1/notifications/email', [TransactionalEmailController::class, 'store'])
+        ->name('sendportal.api.notifications.email');
+
     Sendportal::apiRoutes();
 });
 
