@@ -23,7 +23,11 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        $schedule->command('ses:process-events')->everyMinute()->withoutOverlapping();
+
+        if (config('sendportal-ses-events.reconcile_enabled')) {
+            $schedule->command('ses:reconcile-delivery --limit=25')->everyFifteenMinutes()->withoutOverlapping();
+        }
     }
 
     /**

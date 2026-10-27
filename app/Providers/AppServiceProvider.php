@@ -4,13 +4,18 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Controllers\Api\SesWebhooksController;
+use App\Http\Controllers\CampaignReportsController;
 use App\Livewire\Setup;
 use App\Mail\ThrottledSesAdapter;
 use App\Models\ApiToken;
 use App\Models\User;
 use App\Observers\CampaignObserver;
+use Aws\Sns\MessageValidator;
 use Illuminate\Contracts\View\View as ViewContract;
 use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
@@ -27,7 +32,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(\Sendportal\Base\Http\Controllers\Api\Webhooks\SesWebhooksController::class, SesWebhooksController::class);
+        $this->app->bind(\Sendportal\Base\Http\Controllers\Campaigns\CampaignReportsController::class, CampaignReportsController::class);
+        $this->app->singleton(MessageValidator::class, static fn () => new MessageValidator(
+            static fn (string $url): string => Cache::remember(
+                'sns-cert:' . hash('sha256', $url),
+                3600,
+                static fn (): string => Http::timeout(5)->withoutRedirecting()->get($url)->throw()->body()
+            )
+        ));
     }
 
     public function boot(): void
